@@ -8,14 +8,25 @@ export interface LoopSettings {
   readonly maxTicksPerFrame: number;
 }
 
+export interface InputSettings {
+  /** Mouse sensitivity: multiplier of 0.022° of rotation per mouse count (Source/CS scale). */
+  readonly mouseSensitivity: number;
+  readonly invertMouseY: boolean;
+  /** Request raw (unaccelerated) mouse movement when capturing, where supported. */
+  readonly rawMouseInput: boolean;
+}
+
 export interface DebugSettings {
   readonly overlay: boolean;
+  /** Temporary input debug panel. */
+  readonly input: boolean;
 }
 
 export interface ClientConfig {
   readonly renderer: RendererSettings;
   readonly camera: ViewCameraSettings;
   readonly loop: LoopSettings;
+  readonly input: InputSettings;
   readonly debug: DebugSettings;
 }
 
@@ -35,8 +46,14 @@ const DEFAULT_CONFIG: ClientConfig = {
     maxFrameDeltaSeconds: 0.25,
     maxTicksPerFrame: 8,
   },
+  input: {
+    mouseSensitivity: 2,
+    invertMouseY: false,
+    rawMouseInput: true,
+  },
   debug: {
     overlay: true,
+    input: false,
   },
 };
 
@@ -51,9 +68,11 @@ export function withRendererBackend(config: ClientConfig, backend: RendererBacke
  *
  * - `?renderer=webgl` forces the WebGL 2 backend.
  * - `?debug=0` hides the debug overlay.
+ * - `?debug=input` also shows the (temporary) input debug panel.
  */
 export function resolveClientConfig(search: string): ClientConfig {
   const params = new URLSearchParams(search);
+  const debug = params.get('debug');
 
   return {
     ...DEFAULT_CONFIG,
@@ -62,8 +81,8 @@ export function resolveClientConfig(search: string): ClientConfig {
       backend: params.get('renderer') === 'webgl' ? 'webgl' : DEFAULT_CONFIG.renderer.backend,
     },
     debug: {
-      ...DEFAULT_CONFIG.debug,
-      overlay: params.get('debug') !== '0' && DEFAULT_CONFIG.debug.overlay,
+      overlay: debug === '0' ? false : DEFAULT_CONFIG.debug.overlay || debug === 'input',
+      input: debug === 'input' || DEFAULT_CONFIG.debug.input,
     },
   };
 }

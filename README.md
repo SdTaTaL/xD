@@ -4,8 +4,9 @@ Fundação técnica do cliente de um FPS competitivo para browser.
 TypeScript + Vite + Three.js (WebGPU com fallback para WebGL 2).
 
 Estado atual: bootstrap, renderer, câmara, game loop com simulação a tick fixo,
-arena graybox, iluminação e overlay de debug. Ainda não há gameplay, input,
-rede, áudio nem UI de jogo, e isso é intencional (ver [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)).
+arena graybox, iluminação, overlay de debug e sistema de input (um comando de
+input por tick, independente do dispositivo). Ainda não há gameplay (movimento,
+armas), rede, áudio nem UI de jogo, e isso é intencional (ver [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)).
 
 ## Requisitos
 
@@ -17,17 +18,38 @@ rede, áudio nem UI de jogo, e isso é intencional (ver [docs/ARCHITECTURE.md](d
 ```bash
 npm install         # instalar dependências
 npm run dev         # servidor de desenvolvimento em http://localhost:5173
-npm run typecheck   # verificação de tipos (cliente, código partilhado e configs)
+npm run typecheck   # verificação de tipos (cliente, código partilhado, testes e configs)
+npm test            # testes unitários (Vitest); npm run test:watch em modo watch
 npm run build       # typecheck + build de produção em dist/
 npm run preview     # servir o build de produção em http://localhost:4173
 ```
 
 ### Parâmetros de desenvolvimento (query string)
 
-| Parâmetro        | Efeito                               |
-| ---------------- | ------------------------------------ |
-| `?renderer=webgl` | Força o backend WebGL 2              |
-| `?debug=0`        | Esconde o overlay de debug           |
+| Parâmetro         | Efeito                                                   |
+| ----------------- | -------------------------------------------------------- |
+| `?renderer=webgl` | Força o backend WebGL 2                                  |
+| `?debug=0`        | Esconde o overlay de debug                               |
+| `?debug=input`    | Mostra também o painel **temporário** de debug do input  |
+
+### Controlos (desktop)
+
+Clicar na vista do jogo captura o rato (Pointer Lock). `Esc` liberta-o.
+Enquanto não há captura, nenhum input chega ao jogo.
+
+| Entrada               | Ação                       |
+| --------------------- | -------------------------- |
+| `W` `A` `S` `D`       | mover (frente/esq./trás/dir.) |
+| Rato                  | olhar                      |
+| `Espaço`              | jump                       |
+| `Ctrl`                | crouch                     |
+| `Shift`               | sprint                     |
+| `R`                   | reload                     |
+| Botão esquerdo        | fire                       |
+| Botão direito         | aim                        |
+
+Por agora, nenhum sistema de gameplay consome estes comandos. Use
+`?debug=input` para os ver.
 
 ## Estrutura
 
@@ -47,12 +69,16 @@ src/
     time/FixedTimestep.ts   acumulador de passo fixo (sem relógio próprio)
     maps/MapDefinition.ts   formato de dados de mapas (sólidos AABB) + bounds
     maps/grayboxArena.ts    arena graybox simétrica
+    input/                  InputAction, InputCommand (contrato de rede), histórico por tick
   client/
     app/                    composition root (ClientApp), configuração, ecrã de erro fatal
     core/                   contrato GameSystem, scheduler de fases, game loop, logger
+    input/                  InputSystem, InputState/InputPort, construção do comando por tick
+      adapters/             dispositivo → input abstrato (teclado+rato; touch/gamepad no futuro)
+      devices/              eventos do browser, Pointer Lock, focus/visibility
     rendering/              renderer WebGPU/WebGL 2, viewport/resize, câmara, materiais TSL
     world/                  vista do mapa (malhas) e iluminação
-    debug/                  estatísticas de frame e overlay de debug
+    debug/                  estatísticas de frame, overlay de debug, painel temporário de input
     styles/                 CSS global
 ```
 

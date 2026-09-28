@@ -5,6 +5,10 @@ import { SIMULATION_TICK_RATE } from '@shared/simulation/SimulationConfig';
 import { GameLoop } from '../core/GameLoop';
 import { SystemScheduler } from '../core/SystemScheduler';
 import { DebugOverlay } from '../debug/DebugOverlay';
+import { InputDebugPanel } from '../debug/InputDebugPanel';
+import { DEFAULT_KEYBOARD_MOUSE_BINDINGS, KeyboardMouseAdapter } from '../input/adapters/KeyboardMouseAdapter';
+import { BrowserKeyboardMouseDevice } from '../input/devices/BrowserKeyboardMouseDevice';
+import { InputSystem } from '../input/InputSystem';
 import { GameRenderer, type RenderBackend } from '../rendering/GameRenderer';
 import { createViewCamera } from '../rendering/ViewCamera';
 import { Viewport } from '../rendering/Viewport';
@@ -20,6 +24,9 @@ export interface ClientAppOptions {
 }
 
 const SKY_COLOR = 0x9db4c8;
+
+/** Two seconds of input commands stay readable by tick. */
+const INPUT_HISTORY_TICKS = 2 * SIMULATION_TICK_RATE;
 
 /**
  * Fixed overview of the arena used until a player or spectator camera
@@ -81,6 +88,41 @@ export class ClientApp {
           }),
         );
       }
+
+      // Input runs before anything that simulates, so each tick's command
+      // exists when gameplay reads it. It is independent of the renderer.
+      const input = new InputSystem({ historyTicks: INPUT_HISTORY_TICKS });
+      scheduler.add(input);
+      const keyboardMouse = input.addAdapter(
+        'keyboard-mouse',
+        (port) =>
+          new KeyboardMouseAdapter(
+            port,
+            new BrowserKeyboardMouseDevice({
+              element: root,
+              captureOnClick: true,
+              rawMouseInput: config.input.rawMouseInput,
+            }),
+            {
+              bindings: DEFAULT_KEYBOARD_MOUSE_BINDINGS,
+              mouse: { sensitivity: config.input.mouseSensitivity, invertY: config.input.invertMouseY },
+            },
+          ),
+      );
+      if (config.debug.input) {
+        scheduler.add(
+          new InputDebugPanel({
+            parent: root,
+            commands: input.commands,
+            getDeviceState: () => ({
+              captured: keyboardMouse.device.captured,
+              keys: keyboardMouse.pressedKeys,
+              buttons: keyboardMouse.pressedButtons,
+            }),
+          }),
+        );
+      }
+
       const viewport = new Viewport(root);
       scheduler.add(viewport);
       scheduler.add(renderer);

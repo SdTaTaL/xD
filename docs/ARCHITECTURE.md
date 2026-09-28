@@ -27,15 +27,17 @@ onde os sistemas futuros vão encaixar, sem os implementar.
 ## Camadas e dependências
 
 ```
-main.ts ──► client/app ──► client/{core, rendering, world, debug}
-                 │                         │
-                 └──────────► shared ◄─────┘
+main.ts ──► client/app ──► client/{core, input, rendering, world, debug}
+                 │                             │
+                 └────────────► shared ◄───────┘
 ```
 
 - `shared` → não depende de nada do projeto (nem de Three.js).
 - `client/core` → só `shared`. Loop, scheduler e contrato de sistemas.
 - `client/rendering` → Three.js + `client/core`.
 - `client/world` → `rendering` + `shared/maps`. Converte dados do mapa em malhas.
+- `client/input` → `client/core` + `shared/input`. Não conhece o renderer, e o
+  renderer não conhece o input.
 - `client/app` → junta tudo. É o único sítio que conhece todas as peças.
 
 ## Game loop e fases
@@ -58,8 +60,10 @@ Proteções do loop:
 - no máximo 8 ticks por frame, e o atraso acima disso é descartado (evita a "spiral of death");
 - uma exceção num frame para o loop e é reportada uma única vez.
 
-Sistemas atuais: `DebugOverlay` (primeiro, para medir o frame inteiro),
-`Viewport`, `GameRenderer`.
+Sistemas atuais, por ordem: `DebugOverlay` (primeiro, para medir o frame
+inteiro), `InputSystem`, `InputDebugPanel` (temporário, só com `?debug=input`),
+`Viewport`, `GameRenderer`. Os sistemas de gameplay vão ser registados depois
+do `InputSystem`, para que o comando do tick já exista quando o leem.
 
 ## Renderização
 
@@ -85,6 +89,86 @@ Sistemas atuais: `DebugOverlay` (primeiro, para medir o frame inteiro),
 - **Pipelines** são compiladas no arranque (`compileAsync`), para evitar
   engasgos de compilação de shaders nos primeiros frames.
 
+## Input
+
+O gameplay recebe apenas `InputCommand`: um objeto imutável por tick, igual
+para teclado/rato, touch ou gamepad. Nunca vê `KeyboardEvent`, `MouseEvent`
+ou `TouchEvent`.
+
+```
+Dispositivo ─► Adapter ─► InputState ─► InputCommandBuilder ─► InputCommandBuffer ─► gameplay
+(browser)      (mapeia)   (agrega)      (quantiza, 1 por tick)   (histórico por tick)   commands.get(tick)
+```
+
+| Camada | Ficheiros | Responsabilidade |
+| ------ | --------- | ---------------- |
+| Dispositivo | `client/input/devices/` | Eventos do browser, Pointer Lock, focus/visibility. Emite identificadores físicos (`KeyW`, `left`) sem significado de jogo. |
+| Adapter | `client/input/adapters/` | Mapeia o dispositivo para input abstrato através de bindings (dados) e sensibilidade. Escreve num `InputPort`. |
+| Estado | `client/input/InputState.ts` | Agrega todas as fontes: ações seguras, movimento analógico, look acumulado ou por taxa. Regista as pressões no momento em que acontecem. |
+| Comando | `client/input/InputCommandBuilder.ts`, `shared/input/` | Uma amostra por tick → `InputCommand` quantizado e congelado. |
+| Consumo | `InputSystem.commands` | `InputCommandSource.get(tick)`, lido no `fixedUpdate` do gameplay. |
+
+### InputCommand (`shared/input/InputCommand.ts`)
+
+| Campo | Significado | Grelha (determinismo / rede) |
+| ----- | ----------- | ---------------------------- |
+| `tick` | tick de simulação a que se aplica | inteiro ≥ 0 |
+| `moveX`, `moveY` | intenção de movimento; +X direita, +Y frente; vetor no disco unitário | múltiplos de 1/127 (int8) |
+| `lookX`, `lookY` | rotação neste tick, em radianos; +X direita, +Y cima | múltiplos de 2⁻¹⁶ rad |
+| `held` | ações seguras no momento da amostra (contínuo: sprint, crouch, fogo automático) | bitmask |
+| `pressed` | ações que desceram neste tick, incluindo toques mais curtos que um tick (one-shot: jump, reload) | bitmask |
+
+- A ordem de `INPUT_ACTIONS` define o bit de cada ação e faz parte do formato
+  de rede: acrescentar no fim, nunca reordenar.
+- Os valores são quantizados quando o comando é criado. O cliente simula
+  exatamente com os valores que um servidor vai receber. O resto sub-quantum
+  do look passa para o tick seguinte, por isso nenhum movimento de rato se
+  perde.
+- O mesmo input, com o mesmo timing de frames, produz sempre os mesmos
+  comandos (há testes para isto). `-0` é normalizado para `0`, e usa-se
+  `Math.sqrt` em vez de `Math.hypot` porque o resultado é exato por especificação.
+- Todos os ticks têm comando. Sem input (ou sem captura) o comando é neutro.
+- Num frame lento que corre vários ticks, o look acumulado e as pressões vão
+  para o primeiro tick. As ações seguras e o movimento mantêm-se nos seguintes.
+
+### Captura e inputs presos (desktop)
+
+- Captura = Pointer Lock no elemento raiz do jogo (clique para capturar, `Esc`
+  liberta). Pede-se movimento raw (`unadjustedMovement`). Se não for
+  suportado, usa-se o pointer lock normal.
+- Sem captura, nenhum input chega ao gameplay. O clique que captura não conta
+  como `fire`.
+- Tudo é libertado ao perder a captura, ao perder o focus (`blur`), ao
+  esconder o separador, e ao soltar ⌘ no macOS (que não envia os keyup das
+  outras teclas). Um input seguro durante a perda tem de ser pressionado de
+  novo.
+- O estado de captura segue `document.pointerLockElement` em cada evento: o
+  browser atualiza-o antes de entregar `pointerlockchange`.
+- Com captura: auto-repeat ignorado, `preventDefault` em todas as teclas exceto
+  `Esc` e F1–F12, menu de contexto bloqueado, e pedido de confirmação antes de
+  sair da página (o browser não deixa intercetar Ctrl+W).
+- As teclas usam `KeyboardEvent.code` (posição física): WASD fica no mesmo
+  sítio em AZERTY/QWERTZ.
+
+### Adicionar Touch (ou gamepad)
+
+O `InputPort` já cobre o que os controlos mobile precisam:
+
+| Controlo touch | Chamada no `InputPort` |
+| -------------- | ---------------------- |
+| joystick virtual esquerdo | `setMove(x, y)` (analógico, com deadzone/curva no adapter) |
+| joystick de câmara direito | `setLookRate(yawRate, pitchRate)`, integrado por tick |
+| arrastar para olhar | `addLook(yaw, pitch)` |
+| botões fire / aim / crouch / jump / reload | `press(action)` / `release(action)` |
+| `touchcancel`, UI escondida | `releaseAll()` |
+
+Basta um dispositivo `devices/` (a UI touch em DOM), um `TouchAdapter` e
+`input.addAdapter('touch', (port) => new TouchAdapter(port, …))` no
+`ClientApp`. Várias fontes podem coexistir (teclado + touch num tablet). Uma
+ação está segura enquanto qualquer fonte a segurar, e o movimento é somado e
+limitado ao disco unitário. O gameplay não muda. Um gamepad usa o mesmo
+caminho, lido no `poll()` do adapter (Gamepad API).
+
 ## Mapas
 
 `MapDefinition` (shared) descreve a geometria estática como dados puros:
@@ -95,12 +179,12 @@ material por tipo de sólido.
 
 ## Onde entram os sistemas futuros
 
-Nada disto existe ainda. A tabela indica apenas onde cada sistema deve viver
-quando for pedido.
+Exceto o Input, nada disto existe ainda. A tabela indica apenas onde cada
+sistema deve viver quando for pedido.
 
 | Sistema      | Lógica partilhada (`src/shared`)                     | Cliente (`src/client`)                                     |
 | ------------ | ---------------------------------------------------- | ---------------------------------------------------------- |
-| Input        | formato do comando de input por tick                 | `input/`: teclado/rato/pointer lock, amostrado em `beginFrame` |
+| Input        | ✅ implementado: `shared/input/`                      | ✅ `input/`: teclado + rato. Falta touch e gamepad (ver [Input](#input)) |
 | Player       | movimento determinístico (usado na predição e no servidor) | `player/`: câmara em 1ª pessoa, interpolação           |
 | Weapons      | dados e regras de armas, hitscan                     | `weapons/`: viewmodels, efeitos                            |
 | Gameplay     | regras de ronda/modo, estado de jogo                 | ligação do estado à apresentação                           |
@@ -119,6 +203,9 @@ backend. Ficam fora deste cliente e dependem do servidor autoritativo.
   servidores. Está num único sítio (`SimulationConfig`), por isso é fácil mudar.
 - **Sem framework de UI, ECS ou física** por agora: seriam dependências antes de
   existir um problema concreto que as justifique.
+- **Vitest** para testes (só devDependency): reutiliza a config do Vite
+  (aliases, TypeScript) sem loaders próprios. Os testes correm em Node, sem DOM
+  simulado. O dispositivo do browser é testado com `EventTarget` e fakes mínimos.
 - **TypeScript estrito** (`strict`, `noUncheckedIndexedAccess`,
   `exactOptionalPropertyTypes`). `erasableSyntaxOnly` proíbe sintaxe que
   gera código (enums, namespaces), por isso os ficheiros continuam
