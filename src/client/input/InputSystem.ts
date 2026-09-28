@@ -2,7 +2,7 @@ import { InputCommandBuffer, type InputCommandSource } from '@shared/input/Input
 import type { GameSystem, TickContext } from '../core/GameSystem';
 import type { InputAdapter } from './adapters/InputAdapter';
 import { InputCommandBuilder } from './InputCommandBuilder';
-import { InputState, type InputPort } from './InputState';
+import { InputState, type InputPort, type LookDelta } from './InputState';
 
 export interface InputSystemOptions {
   /** How many past ticks of commands stay readable. */
@@ -51,6 +51,15 @@ export class InputSystem implements GameSystem {
       this.state.disconnect(sourceId);
       throw error;
     }
+  }
+
+  /**
+   * Look input received since the last tick that is not yet in any command
+   * (presentation only: the view can turn at display rate without waiting for
+   * the next tick; the simulation still only sees commands).
+   */
+  previewLook(elapsedSinceTickSeconds: number): LookDelta {
+    return this.state.peekLook(elapsedSinceTickSeconds);
   }
 
   beginFrame(): void {

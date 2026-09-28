@@ -26,9 +26,9 @@ function signed(value: number, digits: number): string {
 }
 
 /**
- * TEMPORARY input debug panel, enabled with `?debug=input`. It exists only to
- * verify the input pipeline before any gameplay consumes commands; delete it
- * once the player controller does.
+ * TEMPORARY input debug panel, enabled with `?debug=input`. It verifies the
+ * input pipeline (device state, commands, 64 Hz rate). Delete it together
+ * with the player debug panel when movement tuning is done.
  *
  * It consumes commands exactly as gameplay will: `commands.get(tick)` from
  * its own `fixedUpdate`, registered after the input system.

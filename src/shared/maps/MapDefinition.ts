@@ -15,16 +15,26 @@ export interface MapSolid {
   readonly size: Vec3;
 }
 
+/** Where and facing which way a player can appear. */
+export interface SpawnPoint {
+  /** Feet position, meters. */
+  readonly position: Vec3;
+  /** Initial yaw, radians (0 faces −Z, positive turns right). */
+  readonly yaw: number;
+}
+
 /**
  * Pure-data description of a map's static geometry.
  *
- * Kept free of rendering concerns so the same definition can later feed
- * client rendering, collision and the authoritative server.
+ * Kept free of rendering concerns so the same definition feeds client
+ * rendering, collision and (later) the authoritative server.
  */
 export interface MapDefinition {
   readonly id: string;
   readonly name: string;
   readonly solids: readonly MapSolid[];
+  /** At least one. */
+  readonly spawnPoints: readonly SpawnPoint[];
 }
 
 export interface Bounds3 {

@@ -170,3 +170,18 @@ describe('InputState release', () => {
     expect(state.held).toBe(NO_ACTIONS);
   });
 });
+
+describe('InputState look preview', () => {
+  it('peeks at pending look without consuming it', () => {
+    const state = new InputState();
+    const mouse = state.connect('kbm');
+    const stick = state.connect('stick');
+    mouse.addLook(0.02, -0.01);
+    stick.setLookRate(1, 0.5);
+
+    expect(state.peekLook(0.25)).toEqual({ yaw: 0.02 + 0.25, pitch: -0.01 + 0.125 });
+    const sample = state.sample(TICK);
+    expect(sample.lookX).toBeCloseTo(0.02 + TICK, 12);
+    expect(state.peekLook(0)).toEqual({ yaw: 0, pitch: 0 });
+  });
+});

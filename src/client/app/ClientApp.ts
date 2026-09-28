@@ -1,14 +1,19 @@
 import { Color, Scene } from 'three/webgpu';
 import { GRAYBOX_ARENA } from '@shared/maps/grayboxArena';
 import { getMapBounds } from '@shared/maps/MapDefinition';
-import { SIMULATION_TICK_RATE } from '@shared/simulation/SimulationConfig';
+import { CollisionWorld } from '@shared/physics/CollisionWorld';
+import { DEFAULT_PLAYER_MOVEMENT } from '@shared/player/PlayerMovementConfig';
+import { SIMULATION_TICK_RATE, SIMULATION_TICK_SECONDS } from '@shared/simulation/SimulationConfig';
 import { GameLoop } from '../core/GameLoop';
 import { SystemScheduler } from '../core/SystemScheduler';
 import { DebugOverlay } from '../debug/DebugOverlay';
 import { InputDebugPanel } from '../debug/InputDebugPanel';
+import { PlayerDebugPanel } from '../debug/PlayerDebugPanel';
 import { DEFAULT_KEYBOARD_MOUSE_BINDINGS, KeyboardMouseAdapter } from '../input/adapters/KeyboardMouseAdapter';
 import { BrowserKeyboardMouseDevice } from '../input/devices/BrowserKeyboardMouseDevice';
 import { InputSystem } from '../input/InputSystem';
+import { FirstPersonCamera } from '../player/FirstPersonCamera';
+import { LocalPlayerSystem } from '../player/LocalPlayerSystem';
 import { GameRenderer, type RenderBackend } from '../rendering/GameRenderer';
 import { createViewCamera } from '../rendering/ViewCamera';
 import { Viewport } from '../rendering/Viewport';
@@ -29,15 +34,6 @@ const SKY_COLOR = 0x9db4c8;
 const INPUT_HISTORY_TICKS = 2 * SIMULATION_TICK_RATE;
 
 /**
- * Fixed overview of the arena used until a player or spectator camera
- * exists. Position and look-at target, in meters.
- */
-const OVERVIEW_CAMERA = {
-  position: [-21, 11, 23],
-  target: [0, 0, 2],
-} as const;
-
-/**
  * Composition root of the browser client: creates the engine services and
  * the world, wires them into the loop and owns their lifetime.
  */
@@ -53,46 +49,23 @@ export class ClientApp {
     const scheduler = new SystemScheduler();
     const worldDisposers: (() => void)[] = [];
     let createdRenderer: GameRenderer | null = null;
+    let unregisteredInput: InputSystem | null = null;
 
     try {
       const scene = new Scene();
       scene.background = new Color(SKY_COLOR);
-
       const camera = createViewCamera(config.camera);
-      camera.position.set(...OVERVIEW_CAMERA.position);
-      camera.lookAt(...OVERVIEW_CAMERA.target);
 
-      // The world is built before the renderer so its startup check compiles
-      // and draws the real scene.
       const map = GRAYBOX_ARENA;
       const mapView = new MapView(map);
       const lighting = new Lighting({ bounds: getMapBounds(map), shadows: config.renderer.shadows });
       scene.add(mapView.root, lighting.root);
       worldDisposers.push(() => mapView.dispose(), () => lighting.dispose());
 
-      const renderer = await GameRenderer.create({
-        ...config.renderer,
-        scene,
-        camera,
-        onDeviceLost: options.onRendererLost,
-      });
-      createdRenderer = renderer;
-
-      if (config.debug.overlay) {
-        // First in registration order: it times the whole frame (see DebugOverlay).
-        scheduler.add(
-          new DebugOverlay({
-            parent: root,
-            tickRate: SIMULATION_TICK_RATE,
-            getRenderStats: () => renderer.getStats(),
-          }),
-        );
-      }
-
-      // Input runs before anything that simulates, so each tick's command
-      // exists when gameplay reads it. It is independent of the renderer.
+      // Input and the local player exist before the renderer so its startup
+      // check draws the real first-person view. Input is independent of the renderer.
       const input = new InputSystem({ historyTicks: INPUT_HISTORY_TICKS });
-      scheduler.add(input);
+      unregisteredInput = input;
       const keyboardMouse = input.addAdapter(
         'keyboard-mouse',
         (port) =>
@@ -109,6 +82,45 @@ export class ClientApp {
             },
           ),
       );
+
+      const spawn = config.debug.spawn ?? map.spawnPoints[0];
+      if (!spawn) throw new Error(`Map "${map.id}" has no spawn point`);
+      const movement = DEFAULT_PLAYER_MOVEMENT;
+      const player = new LocalPlayerSystem({
+        commands: input.commands,
+        context: { world: CollisionWorld.fromMap(map), config: movement, tickSeconds: SIMULATION_TICK_SECONDS },
+        spawn,
+      });
+      const firstPerson = new FirstPersonCamera({
+        camera,
+        player,
+        config: movement,
+        tickSeconds: SIMULATION_TICK_SECONDS,
+        previewLook: (elapsed) => input.previewLook(elapsed),
+      });
+
+      const renderer = await GameRenderer.create({
+        ...config.renderer,
+        scene,
+        camera,
+        onDeviceLost: options.onRendererLost,
+      });
+      createdRenderer = renderer;
+
+      // Registration order is phase order (see GameSystem).
+      if (config.debug.overlay) {
+        // First: it times the whole frame (see DebugOverlay).
+        scheduler.add(
+          new DebugOverlay({
+            parent: root,
+            tickRate: SIMULATION_TICK_RATE,
+            getRenderStats: () => renderer.getStats(),
+          }),
+        );
+      }
+      // Input before simulation, so each tick's command exists when it is read.
+      scheduler.add(input);
+      unregisteredInput = null;
       if (config.debug.input) {
         scheduler.add(
           new InputDebugPanel({
@@ -122,6 +134,12 @@ export class ClientApp {
           }),
         );
       }
+      scheduler.add(player);
+      if (config.debug.player) {
+        scheduler.add(new PlayerDebugPanel({ parent: root, player, config: movement }));
+      }
+      // Presentation: after simulation, before rendering.
+      scheduler.add(firstPerson);
 
       const viewport = new Viewport(root);
       scheduler.add(viewport);
@@ -136,6 +154,7 @@ export class ClientApp {
     } catch (error) {
       for (const dispose of worldDisposers.reverse()) dispose();
       scheduler.dispose();
+      unregisteredInput?.dispose();
       createdRenderer?.dispose();
       throw error;
     }

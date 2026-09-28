@@ -27,9 +27,9 @@ onde os sistemas futuros vão encaixar, sem os implementar.
 ## Camadas e dependências
 
 ```
-main.ts ──► client/app ──► client/{core, input, rendering, world, debug}
-                 │                             │
-                 └────────────► shared ◄───────┘
+main.ts ──► client/app ──► client/{core, input, player, rendering, world, debug}
+                 │                                     │
+                 └────────────────► shared ◄───────────┘
 ```
 
 - `shared` → não depende de nada do projeto (nem de Three.js).
@@ -38,6 +38,9 @@ main.ts ──► client/app ──► client/{core, input, rendering, world, de
 - `client/world` → `rendering` + `shared/maps`. Converte dados do mapa em malhas.
 - `client/input` → `client/core` + `shared/input`. Não conhece o renderer, e o
   renderer não conhece o input.
+- `shared/player` → `shared/{input, physics, math}`. A simulação do jogador não
+  conhece DOM, Three.js nem o cliente.
+- `client/player` → `shared/player` + a câmara Three.js (apresentação).
 - `client/app` → junta tudo. É o único sítio que conhece todas as peças.
 
 ## Game loop e fases
@@ -61,9 +64,10 @@ Proteções do loop:
 - uma exceção num frame para o loop e é reportada uma única vez.
 
 Sistemas atuais, por ordem: `DebugOverlay` (primeiro, para medir o frame
-inteiro), `InputSystem`, `InputDebugPanel` (temporário, só com `?debug=input`),
-`Viewport`, `GameRenderer`. Os sistemas de gameplay vão ser registados depois
-do `InputSystem`, para que o comando do tick já exista quando o leem.
+inteiro), `InputSystem`, `InputDebugPanel` (temporário), `LocalPlayerSystem`,
+`PlayerDebugPanel` (temporário), `FirstPersonCamera`, `Viewport`,
+`GameRenderer`. A simulação vem sempre depois do `InputSystem`, para que o
+comando do tick já exista quando é lido.
 
 ## Renderização
 
@@ -169,27 +173,174 @@ ação está segura enquanto qualquer fonte a segurar, e o movimento é somado e
 limitado ao disco unitário. O gameplay não muda. Um gamepad usa o mesmo
 caminho, lido no `poll()` do adapter (Gamepad API).
 
+## Player Controller
+
+```
+InputCommand ─► simulatePlayerTick(estado anterior, comando, contexto) ─► PlayerState ─► FirstPersonCamera ─► render
+                (shared/player: pura e determinística)                    (dados)        (client: apresentação)
+```
+
+`simulatePlayerTick` recebe apenas o estado anterior, o `InputCommand`, o
+`CollisionWorld`, a configuração e o delta fixo do tick. Não muta nada e
+devolve um `PlayerState` novo e congelado. Por isso, o mesmo estado inicial
+com os mesmos comandos dá sempre o mesmo resultado, bit a bit (há testes para
+isto). É a base da futura predição no cliente: guardar (comando, estado) por
+tick e, quando chegar uma correção do servidor, voltar a simular a partir
+dela. O servidor corre a mesma função. O seno e o cosseno do yaw usam
+`shared/math/deterministicTrig.ts`: só +, −, ×, ÷ e `Math.round`, porque os
+resultados de `Math.sin`/`Math.cos` podem diferir entre motores JavaScript.
+
+| Ficheiro (`shared/player/`) | Responsabilidade |
+| --- | --- |
+| `PlayerState.ts` | estado completo e serializável (posição dos pés, velocidade, yaw/pitch, grounded, crouched, crouchAmount, sprinting, jump buffer); hull e altura dos olhos |
+| `PlayerMovementConfig.ts` | todos os valores de tuning, documentados um a um |
+| `look.ts` | yaw livre (com wrap) e pitch limitado |
+| `horizontal.ts` | velocidade desejada (vetor limitado ao disco unitário), aceleração no chão e controlo no ar |
+| `vertical.ts` | gravidade (cinemática exata) e jump buffer |
+| `crouch.ts` | agachar e levantar, com verificação de espaço |
+| `kinematics.ts` | collide-and-slide por eixo, subir degraus e sonda de chão |
+| `PlayerController.ts` | ordem das fases dentro de um tick |
+
+### Valores iniciais (`DEFAULT_PLAYER_MOVEMENT`)
+
+| Parâmetro | Valor | Consequência a 64 Hz |
+| --- | --- | --- |
+| hull | 0,6 × 1,8 m (agachado 1,3 m) | passa em aberturas de 0,65 m e em túneis de 1,5 m agachado |
+| olhos | 1,62 m / 1,12 m (0,18 m abaixo do topo) | agachar no ar não mexe a vista |
+| walk / sprint / crouch | 4,8 / 6,4 / 1,9 m/s | 10 s para atravessar a arena; sprint +33 %; crouch 40 % |
+| sprint | só com ≥ 0,5 de componente para a frente (≤ 60°) | W e W+A/D fazem sprint; strafe puro e recuar não fazem |
+| aceleração no chão | 50 m/s² | 0 → 4,8 m/s em 7 ticks (0,11 s) |
+| desaceleração no chão | 70 m/s² | 4,8 → 0 em 5 ticks (0,08 s, < 0,2 m) |
+| controlo no ar | 5 m/s² | ~3 m/s de correção por salto; nunca ganha velocidade |
+| gravidade / salto | 20 m/s², 1,0 m | impulso √(2gh) = 6,32 m/s; 0,64 s no ar |
+| jump buffer | 0,1 s (6 ticks) | um salto premido pouco antes de aterrar não se perde |
+| degrau | 0,35 m | escadas e lancis sem saltar; 0,5 m obriga a saltar |
+| pitch | ±89° | |
+
+Estes são valores de partida para afinar, não definitivos. Os testes
+verificam as consequências (por exemplo, tempo até à velocidade máxima)
+calculadas a partir da configuração.
+
+### Movimento horizontal
+
+- A direção do input é limitada ao disco unitário: W+D é normalizado e não é
+  mais rápido que W. Um stick analógico a meio pede metade da velocidade.
+- **No chão**, a velocidade aproxima-se da velocidade desejada em linha reta,
+  a ritmo constante. Acelera a 50 m/s². Parar, travar contra o movimento ou
+  perder velocidade acima do limite é a 70 m/s². Como a aproximação é em linha
+  reta, a velocidade nunca ultrapassa max(atual, limite da postura).
+- **No ar**, sem input, o momento mantém-se. Com input, a velocidade é
+  orientada para a direção desejada à velocidade atual (ou ao limite, se for
+  maior). Dá para corrigir e travar, mas não há strafe-jumping nem bunny-hop
+  que acrescentem velocidade.
+- **Contra uma parede**, conta só a parte do input paralela à parede, que
+  acelera ao ritmo normal. Não se perde aceleração no eixo bloqueado.
+
+### Colisão (`shared/physics/`)
+
+O jogador é uma caixa (AABB) e o mapa é feito de caixas, por isso a colisão é
+exata sem motor de física:
+
+- O movimento é varrido um eixo de cada vez contra todos os sólidos
+  (`CollisionWorld.sweep`). Não há túneis a nenhuma velocidade, e a
+  componente paralela a uma parede mantém-se (deslizar).
+- O eixo com maior deslocamento vai primeiro, o que torna natural contornar
+  cantos exteriores.
+- Uma tolerância de contacto de 1 µm faz com que tocar numa superfície não
+  seja intersetar. Por isso, estar pousado no chão, deslizar por uma parede ou
+  passar por juntas entre caixas nunca prende.
+- **Degraus:** se o movimento no chão ficar bloqueado, repete-se levantado até
+  0,35 m e desce-se depois. Só é aceite se chegar mais longe. Paredes mais
+  altas que um degrau continuam a bloquear, por isso não se trepam paredes.
+- **Salvaguarda:** no início de cada tick, se o hull estiver dentro de
+  geometria (spawn, teleporte, futura correção de rede), é empurrado para fora
+  pelo eixo mais curto.
+- Rapier não foi necessário. Faz sentido quando houver geometria não-AABB
+  (rampas, malhas) ou corpos dinâmicos.
+
+### Grounded
+
+- Depois de mover, faz-se uma sonda de chão para baixo. Se estiver a subir,
+  nunca está grounded.
+- A andar (grounded no tick anterior e sem saltar), a sonda chega aos 0,35 m:
+  descer degraus e lancis mantém o contacto com o chão. Uma queda maior
+  deixa-o no ar.
+- No ar, a sonda só chega a 1 cm. O jogador aterra exatamente na superfície
+  (y do topo) e a velocidade vertical passa a 0.
+- Parado no chão não há acumulação de gravidade nem deriva: a posição fica
+  bit a bit igual.
+
+### Crouch
+
+- O hull muda de imediato; a altura dos olhos muda em 0,12 s. A velocidade
+  máxima passa a 1,9 m/s.
+- **No chão:** os pés ficam no sítio e o topo desce.
+- **No ar (ou no tick do salto):** a cabeça fica no sítio e as pernas
+  encolhem 0,5 m. É o crouch-jump, que chega a 1,2 m. Como os olhos estão a
+  0,18 m do topo nas duas posturas, a vista não se mexe.
+- **Levantar** exige espaço livre para o hull de pé. No ar tenta-se primeiro
+  estender as pernas para baixo e depois subir a cabeça. Sem espaço (túnel de
+  1,5 m), o jogador fica agachado e levanta-se sozinho quando houver espaço.
+  Levantar nunca empurra o jogador para dentro de um teto.
+
+### Jump e gravidade
+
+- Salta-se só se estava grounded no início do tick e houve um *press* (não
+  basta ter a tecla segura). Não há duplo salto nem auto-jump.
+- Há um jump buffer de 6 ticks: um press pouco antes de aterrar salta logo no
+  primeiro tick no chão.
+- A gravidade usa cinemática exata (Δy = v·dt − ½·g·dt²), por isso o apex é o
+  configurado a qualquer tick rate.
+- Um teto corta a subida (velocidade vertical 0) e o jogador cai.
+
+### Câmara (`client/player/FirstPersonCamera.ts`)
+
+É só apresentação: lê estados e nunca escreve na simulação.
+- A posição dos olhos é interpolada entre os dois últimos ticks
+  (`frame.alpha`). O movimento é igualmente suave a 60, 144 ou 240 Hz (há um
+  teste por frame).
+- A orientação é o yaw/pitch do último tick mais o look ainda não enviado
+  num comando (`InputSystem.previewLook`). A mira responde à taxa do ecrã sem
+  esperar pelo tick seguinte, e esse tick aplica a mesma rotação. O pitch usa
+  o mesmo limite da simulação.
+- Subidas e descidas de degraus são suavizadas na vertical (4 m/s), em vez de
+  saltarem num tick. As aterragens não são suavizadas.
+
+### Área de teste
+
+A leste da arena, atrás de uma porta, há um laboratório de movimento só para
+desenvolvimento:
+- obstáculos de 0,2 / 0,35 / 0,5 / 0,9 / 1,2 / 1,6 m;
+- escadas até uma plataforma de 1,5 m;
+- corredor de 1,2 m;
+- aberturas de 0,65 m e 0,55 m;
+- túnel com teto a 1,5 m e uma pala a 2,2 m.
+
+A porta tem 2,4 m de altura. `?spawn=x,y,z,yaw` coloca o jogador em qualquer
+ponto, para testes reproduzíveis.
+
 ## Mapas
 
 `MapDefinition` (shared) descreve a geometria estática como dados puros:
-caixas alinhadas aos eixos, em metros. O mesmo formato vai alimentar a
-renderização (hoje), a colisão e o servidor (no futuro). `MapView` (client)
+caixas alinhadas aos eixos, em metros, e os pontos de spawn. O mesmo formato
+alimenta a renderização e a colisão (`CollisionWorld.fromMap`), e vai
+alimentar o servidor. `MapView` (client)
 é apenas uma vista: um único `BoxGeometry` unitário escalado por sólido e um
 material por tipo de sólido.
 
 ## Onde entram os sistemas futuros
 
-Exceto o Input, nada disto existe ainda. A tabela indica apenas onde cada
-sistema deve viver quando for pedido.
+Input, Player e a colisão já existem. O resto indica apenas onde cada sistema
+deve viver quando for pedido.
 
 | Sistema      | Lógica partilhada (`src/shared`)                     | Cliente (`src/client`)                                     |
 | ------------ | ---------------------------------------------------- | ---------------------------------------------------------- |
 | Input        | ✅ implementado: `shared/input/`                      | ✅ `input/`: teclado + rato. Falta touch e gamepad (ver [Input](#input)) |
-| Player       | movimento determinístico (usado na predição e no servidor) | `player/`: câmara em 1ª pessoa, interpolação           |
+| Player       | ✅ `shared/player/`: movimento determinístico           | ✅ `player/`: simulação local e câmara em 1ª pessoa        |
 | Weapons      | dados e regras de armas, hitscan                     | `weapons/`: viewmodels, efeitos                            |
 | Gameplay     | regras de ronda/modo, estado de jogo                 | ligação do estado à apresentação                           |
-| Physics      | colisão contra `MapDefinition` (Rapier só se for necessário) | depuração visual                                   |
-| Networking   | protocolo, serialização, relógio de ticks            | `net/`: transporte, predição e reconciliação               |
+| Physics      | ✅ `shared/physics/`: colisão AABB exata (sem Rapier)   | depuração visual                                           |
+| Networking   | protocolo, serialização, relógio de ticks            | `net/`: transporte; predição = reexecutar `simulatePlayerTick` a partir da correção |
 | Audio        | —                                                    | `audio/`: Web Audio, som posicional                        |
 | UI           | —                                                    | `ui/`: HUD e menus em DOM, por cima do canvas              |
 | Servidor     | reutiliza `src/shared`                               | novo `src/server/`, ou pacote próprio num monorepo          |

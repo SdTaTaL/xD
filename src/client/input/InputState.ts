@@ -46,6 +46,12 @@ export interface InputSample {
   readonly pressed: ActionMask;
 }
 
+/** A view rotation, in radians (+yaw = right, +pitch = up). */
+export interface LookDelta {
+  readonly yaw: number;
+  readonly pitch: number;
+}
+
 interface SourceState {
   held: ActionMask;
   moveX: number;
@@ -156,6 +162,21 @@ export class InputState {
     this.pendingLookX = 0;
     this.pendingLookY = 0;
     return sample;
+  }
+
+  /**
+   * Look rotation the next sample will contain so far, without consuming it:
+   * accumulated relative look plus rates integrated over `elapsedSeconds`.
+   * Lets presentation show the view at display rate, ahead of the next tick.
+   */
+  peekLook(elapsedSeconds: number): LookDelta {
+    let yaw = this.pendingLookX;
+    let pitch = this.pendingLookY;
+    for (const source of this.sources.values()) {
+      yaw += source.lookRateX * elapsedSeconds;
+      pitch += source.lookRateY * elapsedSeconds;
+    }
+    return { yaw, pitch };
   }
 
   /** Releases every source and discards all pending edges and look. */
