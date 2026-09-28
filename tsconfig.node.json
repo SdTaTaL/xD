@@ -1,0 +1,9 @@
+{
+  // Tooling config files executed by Node (Vite).
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023"],
+    "types": []
+  },
+  "include": ["vite.config.ts"]
+}

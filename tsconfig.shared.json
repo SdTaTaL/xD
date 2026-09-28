@@ -1,0 +1,10 @@
+{
+  // Engine-agnostic code that a future headless server must be able to run.
+  // No DOM lib and no ambient types: any browser API used here fails to compile.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023"],
+    "types": []
+  },
+  "include": ["src/shared"]
+}

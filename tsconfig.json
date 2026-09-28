@@ -1,0 +1,9 @@
+{
+  // Solution file for editors. Type checking runs per project via `npm run typecheck`.
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.app.json" },
+    { "path": "./tsconfig.shared.json" },
+    { "path": "./tsconfig.node.json" }
+  ]
+}
