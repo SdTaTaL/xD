@@ -24,9 +24,26 @@ export interface RendererSettings {
   readonly shadows: boolean;
 }
 
+/** A scene and the camera it is drawn with. */
+export interface RenderLayer {
+  readonly scene: Scene;
+  readonly camera: PerspectiveCamera;
+}
+
+/** Everything drawn in a frame: the world, then an optional overlay. */
+interface FrameLayers extends RenderLayer {
+  readonly overlay?: RenderLayer | undefined;
+}
+
 export interface GameRendererOptions extends RendererSettings {
   readonly scene: Scene;
   readonly camera: PerspectiveCamera;
+  /**
+   * Drawn over the scene with its own depth buffer and camera: the
+   * first-person weapon, which must never clip into walls and uses its own
+   * field of view.
+   */
+  readonly overlay?: RenderLayer;
   /** Called if the GPU device (or WebGL context) is lost after initialisation. */
   readonly onDeviceLost: (error: Error, backend: RenderBackend) => void;
 }
@@ -61,8 +78,7 @@ export class GameRenderer implements GameSystem {
   readonly canvas: HTMLCanvasElement;
 
   private readonly renderer: WebGPURenderer;
-  private readonly scene: Scene;
-  private readonly camera: PerspectiveCamera;
+  private readonly layers: FrameLayers;
   private readonly maxPixelRatio: number;
   private readonly bufferSize = new Vector2();
   private disposed = false;
@@ -115,7 +131,8 @@ export class GameRenderer implements GameSystem {
       // frames), then draw once so a backend that cannot render fails here,
       // while falling back is still possible.
       await renderer.compileAsync(options.scene, options.camera);
-      renderer.render(options.scene, options.camera);
+      if (options.overlay) await renderer.compileAsync(options.overlay.scene, options.overlay.camera);
+      GameRenderer.draw(renderer, options);
     } catch (error) {
       renderer.dispose();
       throw error;
@@ -127,8 +144,7 @@ export class GameRenderer implements GameSystem {
   private constructor(renderer: WebGPURenderer, canvas: HTMLCanvasElement, options: GameRendererOptions) {
     this.renderer = renderer;
     this.canvas = canvas;
-    this.scene = options.scene;
-    this.camera = options.camera;
+    this.layers = { scene: options.scene, camera: options.camera, overlay: options.overlay };
     this.maxPixelRatio = options.maxPixelRatio;
     this.backend = 'isWebGPUBackend' in renderer.backend ? 'WebGPU' : 'WebGL 2';
 
@@ -143,11 +159,24 @@ export class GameRenderer implements GameSystem {
   setViewportSize(size: ViewportSize): void {
     const pixelRatio = Math.min(size.devicePixelRatio, this.maxPixelRatio);
     this.renderer.setDrawingBufferSize(size.width, size.height, pixelRatio);
-    setCameraAspect(this.camera, size.width / size.height);
+    setCameraAspect(this.layers.camera, size.width / size.height);
+    if (this.layers.overlay) setCameraAspect(this.layers.overlay.camera, size.width / size.height);
   }
 
   render(): void {
-    this.renderer.render(this.scene, this.camera);
+    GameRenderer.draw(this.renderer, this.layers);
+  }
+
+  /** Draws the scene, then the overlay on top of it: same colour buffer, cleared depth. */
+  private static draw(renderer: WebGPURenderer, layers: FrameLayers): void {
+    renderer.render(layers.scene, layers.camera);
+    if (!layers.overlay) return;
+    renderer.autoClearColor = false;
+    try {
+      renderer.render(layers.overlay.scene, layers.overlay.camera);
+    } finally {
+      renderer.autoClearColor = true;
+    }
   }
 
   getStats(): RenderStats {

@@ -4,11 +4,14 @@ import { getMapBounds } from '@shared/maps/MapDefinition';
 import { CollisionWorld } from '@shared/physics/CollisionWorld';
 import { DEFAULT_PLAYER_MOVEMENT } from '@shared/player/PlayerMovementConfig';
 import { SIMULATION_TICK_RATE, SIMULATION_TICK_SECONDS } from '@shared/simulation/SimulationConfig';
+import { AK47 } from '@shared/weapons/WeaponDefinition';
+import { DEFAULT_WEAPON_RULES } from '@shared/weapons/WeaponRules';
 import { GameLoop } from '../core/GameLoop';
 import { SystemScheduler } from '../core/SystemScheduler';
 import { DebugOverlay } from '../debug/DebugOverlay';
 import { InputDebugPanel } from '../debug/InputDebugPanel';
 import { PlayerDebugPanel } from '../debug/PlayerDebugPanel';
+import { WeaponDebugPanel } from '../debug/WeaponDebugPanel';
 import { DEFAULT_KEYBOARD_MOUSE_BINDINGS, KeyboardMouseAdapter } from '../input/adapters/KeyboardMouseAdapter';
 import { BrowserKeyboardMouseDevice } from '../input/devices/BrowserKeyboardMouseDevice';
 import { InputSystem } from '../input/InputSystem';
@@ -17,6 +20,11 @@ import { LocalPlayerSystem } from '../player/LocalPlayerSystem';
 import { GameRenderer, type RenderBackend } from '../rendering/GameRenderer';
 import { createViewCamera } from '../rendering/ViewCamera';
 import { Viewport } from '../rendering/Viewport';
+import { AmmoCounter } from '../ui/AmmoCounter';
+import { Crosshair } from '../ui/Crosshair';
+import { ImpactMarks } from '../weapons/ImpactMarks';
+import { RecoilView } from '../weapons/RecoilView';
+import { WeaponViewModel } from '../weapons/WeaponViewModel';
 import { Lighting } from '../world/Lighting';
 import { MapView } from '../world/MapView';
 import type { ClientConfig } from './ClientConfig';
@@ -32,6 +40,12 @@ const SKY_COLOR = 0x9db4c8;
 
 /** Two seconds of input commands stay readable by tick. */
 const INPUT_HISTORY_TICKS = 2 * SIMULATION_TICK_RATE;
+
+/**
+ * Seed of the local player's bullet spread. Fixed for now; in multiplayer the
+ * authoritative server hands it out (see docs/ARCHITECTURE.md).
+ */
+const LOCAL_SPREAD_SEED = 1;
 
 /**
  * Composition root of the browser client: creates the engine services and
@@ -86,23 +100,42 @@ export class ClientApp {
       const spawn = config.debug.spawn ?? map.spawnPoints[0];
       if (!spawn) throw new Error(`Map "${map.id}" has no spawn point`);
       const movement = DEFAULT_PLAYER_MOVEMENT;
+      const weapon = AK47;
+      const rules = DEFAULT_WEAPON_RULES;
       const player = new LocalPlayerSystem({
         commands: input.commands,
-        context: { world: CollisionWorld.fromMap(map), config: movement, tickSeconds: SIMULATION_TICK_SECONDS },
+        context: {
+          world: CollisionWorld.fromMap(map),
+          movement,
+          weapon,
+          rules,
+          tickSeconds: SIMULATION_TICK_SECONDS,
+          spreadSeed: LOCAL_SPREAD_SEED,
+        },
         spawn,
       });
+      const recoilView = new RecoilView({ source: player, weapon, rules, settings: config.weaponView });
       const firstPerson = new FirstPersonCamera({
         camera,
         player,
         config: movement,
         tickSeconds: SIMULATION_TICK_SECONDS,
         previewLook: (elapsed) => input.previewLook(elapsed),
+        viewOffset: (alpha) => recoilView.cameraOffset(alpha),
       });
+      const viewModel = config.weaponView.drawViewModel
+        ? new WeaponViewModel({ source: player, weapon, view: firstPerson, fovDegrees: config.weaponView.viewmodelFovDegrees })
+        : null;
+      if (viewModel) worldDisposers.push(() => viewModel.dispose());
+      const impacts = new ImpactMarks({ source: player });
+      scene.add(impacts.mesh);
+      worldDisposers.push(() => impacts.dispose());
 
       const renderer = await GameRenderer.create({
         ...config.renderer,
         scene,
         camera,
+        ...(viewModel ? { overlay: viewModel.layer } : {}),
         onDeviceLost: options.onRendererLost,
       });
       createdRenderer = renderer;
@@ -138,10 +171,33 @@ export class ClientApp {
       if (config.debug.player) {
         scheduler.add(new PlayerDebugPanel({ parent: root, player, config: movement }));
       }
-      // Presentation: after simulation, before rendering.
-      scheduler.add(firstPerson);
-
+      if (config.debug.weapon) {
+        scheduler.add(
+          new WeaponDebugPanel({ parent: root, source: player, weapon, rules, tickSeconds: SIMULATION_TICK_SECONDS, marks: () => impacts.size }),
+        );
+      }
+      // Presentation: after simulation, before rendering. Recoil before the
+      // camera (it decays the screen kick), the HUD after it (it projects
+      // through the camera's final pose).
       const viewport = new Viewport(root);
+      scheduler.add(recoilView);
+      scheduler.add(firstPerson);
+      if (viewModel) scheduler.add(viewModel);
+      scheduler.add(
+        new Crosshair({
+          parent: root,
+          camera,
+          view: firstPerson,
+          aimOffset: (alpha) => recoilView.aimOffset(alpha),
+          source: player,
+          weapon,
+          rules,
+          followRecoil: config.weaponView.crosshairFollowsRecoil,
+          viewport,
+        }),
+      );
+      scheduler.add(new AmmoCounter({ parent: root, source: player, weapon }));
+
       scheduler.add(viewport);
       scheduler.add(renderer);
 

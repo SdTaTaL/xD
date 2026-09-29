@@ -49,8 +49,17 @@ const LANDING_IMPACT_SPEED = 1;
  * 6. gravity (and the jump impulse)
  * 7. horizontal collide-and-slide (with step climbing on the ground), then vertical movement
  * 8. ground detection and snapping; landing costs stamina
+ *
+ * @param maxSpeed running speed allowed by what the player carries (CS: the
+ *   weapon's max speed, e.g. 215 u/s with an AK-47). Defaults to the config's
+ *   max speed (knife). Walk and crouch speeds are fractions of it.
  */
-export function simulatePlayerTick(previous: PlayerState, command: InputCommand, context: PlayerSimulationContext): PlayerState {
+export function simulatePlayerTick(
+  previous: PlayerState,
+  command: InputCommand,
+  context: PlayerSimulationContext,
+  maxSpeed: number = context.config.maxSpeed,
+): PlayerState {
   const { world, config, tickSeconds: dt } = context;
   const body = new Body(previous.position, hullHeight(previous.crouched, config), config.radius);
 
@@ -75,7 +84,7 @@ export function simulatePlayerTick(previous: PlayerState, command: InputCommand,
 
   // 5. Horizontal velocity.
   const walking = isActionHeld(command, 'walk') && !stance.crouched;
-  const speedLimit = config.maxSpeed * staminaSpeedFactor(stamina, config);
+  const speedLimit = maxSpeed * staminaSpeedFactor(stamina, config);
   const wish = wishVelocity(command.moveX, command.moveY, view.yaw, stanceSpeed(stance.crouched, walking, speedLimit, config));
   let planar: Planar = { x: previous.velocity.x, z: previous.velocity.z };
 

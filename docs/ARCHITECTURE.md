@@ -93,6 +93,10 @@ comando do tick já exista quando é lido.
   valor é o do CS2: 106,26° a 16:9 (90° a 4:3).
 - **Pipelines** são compiladas no arranque (`compileAsync`), para evitar
   engasgos de compilação de shaders nos primeiros frames.
+- **Camadas:** a arma em primeira pessoa é desenhada numa segunda passagem
+  (`GameRenderer` `overlay`: cena e câmara próprias, mesma imagem, depth
+  limpo). Nunca atravessa paredes e tem o seu próprio FOV, como os
+  viewmodels do CS. O frame de validação do arranque desenha as duas camadas.
 
 ## Input
 
@@ -182,7 +186,8 @@ InputCommand ─► simulatePlayerTick(estado anterior, comando, contexto) ─�
 ```
 
 `simulatePlayerTick` recebe apenas o estado anterior, o `InputCommand`, o
-`CollisionWorld`, a configuração e o delta fixo do tick. Não muta nada e
+`CollisionWorld`, a configuração, o delta fixo do tick e a velocidade máxima
+do que o jogador tem na mão (a da arma, como no CS; por defeito a da faca). Não muta nada e
 devolve um `PlayerState` novo e congelado. Por isso, o mesmo estado inicial
 com os mesmos comandos dá sempre o mesmo resultado, bit a bit (há testes para
 isto). É a base da futura predição no cliente: guardar (comando, estado) por
@@ -213,7 +218,7 @@ convertidos para metros (1 unidade Source = 1 polegada = 0,0254 m).
 | --- | --- | --- | --- |
 | hull | 32 × 72 u (agachado 54 u) | 0,81 × 1,83 m (1,37 m) | passa em aberturas de 0,85 m, não em 0,75 m; túnel de 1,5 m só agachado |
 | olhos | 64 / 46 u (8 u abaixo do topo) | 1,626 / 1,168 m | agachar no ar não mexe a vista |
-| velocidade máxima | 250 u/s (faca) | 6,35 m/s | as armas vão baixá-la (AK-47: 215 u/s) |
+| velocidade máxima | 250 u/s (faca) | 6,35 m/s | com uma arma na mão é a da arma (AK-47: 215 u/s = 5,46 m/s); os tempos abaixo são com a faca |
 | walk (`Shift`) / crouch | × 0,52 / × 0,34 | 3,30 / 2,16 m/s | atingidas em 9 / 16 ticks |
 | `sv_accelerate` | 5,5 | | 0 → 6,35 m/s em 35 ticks (0,55 s) |
 | `sv_friction` / `sv_stopspeed` | 5,2 / 80 u/s | — / 2,03 m/s | largar as teclas: ≤ 34 % em 13 ticks, parado em 26 (0,41 s, 0,94 m) |
@@ -261,12 +266,19 @@ o spam de saltos não sejam gratuitos. A fórmula exata do CS2 não é pública,
 por isso isto é uma aproximação nossa:
 - saltar e aterrar (a cair a mais de 1 m/s) somam 0,2 de cansaço (0..1), que
   recupera a 0,6/s;
-- com cansaço, a velocidade no chão fica limitada a 6,35 × (1 − 0,4 ×
-  cansaço), e cada salto mantém só essa fração da velocidade horizontal;
+- com cansaço, a velocidade no chão fica limitada à velocidade máxima ×
+  (1 − 0,4 × cansaço), e cada salto mantém só essa fração da velocidade
+  horizontal;
 - um salto isolado: aterra-se a 92 % da velocidade e recupera-se em 0,34 s;
-- saltos encadeados: cada hop perde ~7,6 % (6,35 → 5,87 → 5,42 → 5,01 m/s…).
+- saltos encadeados: cada hop perde ~7,6 % (com a faca: 6,35 → 5,87 → 5,42 → 5,01 m/s…).
 
 Spawns e degraus não contam como aterragens.
+
+Nota: numa atualização de janeiro de 2026 o CS2 deixou de usar stamina nos
+saltos. O abrandamento passou a depender do momento da aterragem (e o bunny
+hop de uma janela de tempo, `sv_bhop_time_window`); o comportamento antigo
+ficou em `sv_legacy_jump`. Esta aproximação corresponde ao comportamento
+antigo. Mudar para o novo é uma decisão pendente.
 
 ### Colisão (`shared/physics/`)
 
@@ -355,6 +367,141 @@ desenvolvimento:
 A porta tem 2,4 m de altura. `?spawn=x,y,z,yaw` coloca o jogador em qualquer
 ponto, para testes reproduzíveis.
 
+## Armas
+
+```
+InputCommand ─► simulateCharacterTick ─► movimento (à velocidade da arma) ─► arma ─► CharacterState + Shot
+                (shared/character)        simulatePlayerTick                  simulateWeaponTick
+Shot ─► RecoilView (câmara) · WeaponViewModel (kick, flash) · ImpactMarks (buracos) · Crosshair / AmmoCounter (HUD)
+```
+
+`simulateCharacterTick` é o tick completo de um jogador: primeiro o
+movimento, depois a arma, que dispara da posição e da vista resultantes.
+É pura e determinística, como o movimento: é o que a predição repete e o
+que o servidor vai correr. O estado da arma (`WeaponState`) é dados simples
+e serializáveis. Cada tiro é um evento (`Shot`: origem, direção, alvo do
+recuo, imprecisão, posição no spray e o impacto).
+
+| Ficheiro (`shared/weapons/`) | Responsabilidade |
+| --- | --- |
+| `WeaponDefinition.ts` | dados de uma arma; a AK-47 com os valores do CS2 (`scripts/weapons.vdata`) |
+| `WeaponRules.ts` | regras comuns a todas as armas (recuo, precisão), com a cvar do CS de onde vêm |
+| `WeaponState.ts` | estado: munição, cadência, reload, spray, penalização de precisão, aim punch |
+| `recoil.ts` | padrão de spray fixo e dinâmica do aim punch |
+| `inaccuracy.ts` | imprecisão por postura, movimento e ar; recuperação |
+| `spread.ts` | direção de cada bala dentro do cone |
+| `damage.ts` | dano com a distância (decidido pelo servidor, não previsto) |
+| `WeaponController.ts` | ordem das fases dentro de um tick |
+
+### AK-47 (valores do CS2)
+
+| Campo CS2 | Valor | No jogo |
+| --- | --- | --- |
+| `m_flCycleTime` | 0,1 s | 600 balas/min: o tiro k sai no tick ⌈6,4 k⌉ |
+| `m_iMaxClip1`, reserva | 30, 3 carregadores | 30 / 90 |
+| `m_flDisallowAttackAfterReloadStartDuration` | 2,466667 s | reload de 158 ticks |
+| `m_flMaxSpeed` | 215 u/s | corre a 5,46 m/s (andar 2,84, agachado 1,86) |
+| `m_nDamage`, `m_flRangeModifier`, `m_flRange` | 36, 0,98, 8192 u | 35,4 a 10 m; alcance 208 m |
+| `m_flSpread` | 0,0006 | espalhamento base de todos os tiros |
+| `m_flInaccuracyStand` / `Crouch` | 0,00641 / 0,00481 | parado ≈ 0,37° / 0,28° |
+| `m_flInaccuracyMove` | 0,17506 | a correr ≈ 10° |
+| `m_flInaccuracyJump` | 0,14076 | no ar ≈ 8° |
+| `m_flInaccuracyFire` | 0,0078 | por tiro, recupera com o tempo |
+| `m_flInaccuracyLand` | 0,000242 | por u/s de queda ao aterrar (a nossa leitura) |
+| `m_flRecoveryTime…` | 0,368 → 0,506 s (agachado 0,305 → 0,420) | entre a 2.ª e a 5.ª bala do spray |
+| `m_flRecoilAngle` / `Variance` | 0° ± 70° | direção de cada kick |
+| `m_flRecoilMagnitude` | 30 °/s | força de cada kick |
+| `m_nRecoilSeed` | 223 | semente do padrão |
+
+### Disparo, munição e reload
+
+- O gatilho dispara num press (mesmo um clique mais curto que um tick) e,
+  nas armas automáticas, enquanto estiver seguro.
+- Cadência exata: o tempo até ao tiro seguinte acumula o excesso enquanto o
+  gatilho está seguro. Os tiros caem em ticks (6 ou 7 ticks de intervalo),
+  mas a média é exatamente 0,1 s. Com o gatilho solto, a espera não acumula.
+- `R` recarrega se faltar munição e houver reserva. Disparar com o
+  carregador vazio também recarrega. Durante o reload não se dispara; no
+  tick em que acaba já se pode disparar.
+
+### Recuo
+
+- Cada arma tem um padrão de spray fixo, gerado uma vez a partir da sua
+  semente (`recoilPattern`): cada kick aponta `recoilAngle ± variance` a
+  partir da vertical e mistura-se com o anterior (`weapon_recoil_variance`
+  0,55), por isso o spray sobe e depois deriva para os lados sem tremer. As
+  4 primeiras balas são suprimidas (50 % → 100 %,
+  `weapon_recoil_suppression_*`). O padrão é igual em todos os sprays e em
+  todas as máquinas, e aprende-se.
+- Cada kick soma velocidade angular ao *aim punch*. A velocidade decai
+  (`weapon_recoil_vel_decay` 4,5) e o ângulo volta a zero de forma
+  exponencial e linear (`weapon_recoil_decay2_exp` 8, `_lin` 18°/s). As balas
+  saem na vista + aim punch × 2 (`weapon_recoil_scale`). Um spray de AK
+  sobe cerca de 10° em 9 balas (1,8 m a 10 m) e depois vai para os lados.
+- Uma pausa de 0,55 s (`weapon_recoil_cooldown`) recomeça o padrão. Uma
+  pausa mais curta continua-o.
+
+### Precisão
+
+Imprecisão de um tiro = postura (de pé / agachado) + movimento (no chão) ou
+salto (no ar) + penalização acumulada.
+- Movimento: nada até 34 % da velocidade da arma (counter-strafe ou andar
+  agachado mantêm a precisão total), e a imprecisão completa a partir de
+  95 %. Andar com `Shift` (52 %) ainda é impreciso com uma rifle, como no CS.
+- Cada tiro soma `inaccuracyFire` à penalização. Aterrar soma
+  `inaccuracyLand` × velocidade de queda. A penalização cai para 10 % em cada
+  tempo de recuperação, mais rápido em taps do que em sprays longos.
+- Direção: dois desvios aleatórios, dentro de discos de raio imprecisão e
+  spread, com raio uniforme (mais tiros perto do centro, como no CS).
+- Aleatoriedade determinística: cada tiro usa `SeededRandom(hashSeed(seed
+  do atirador, tick))`. Cliente e servidor calculam o mesmo desvio. A seed
+  vai ter de vir do servidor (hoje é fixa), para que um cliente não possa
+  escolhê-la.
+
+### Hitscan
+
+A bala é um raio (`CollisionWorld.raycast`, teste de slabs exato contra
+cada caixa) desde os olhos até ao alcance da arma. O primeiro impacto e o
+dano a essa distância (`damageAtDistance`) ficam no `Shot`. Ainda não há
+alvos nem dano aplicado (próximo passo: hitboxes), nem penetração de paredes.
+
+### Determinismo
+
+O estado da arma entra na predição, por isso só usa operações exatas em
+todos os motores: `deterministicExp` (só + − × ÷) para os decaimentos,
+`sinCos` para o padrão e as direções, e `SeededRandom` (inteiros de 32 bits)
+em vez de `Math.random`. Há testes de igualdade bit a bit com milhares de
+ticks de input aleatório com disparos e reloads.
+
+### Apresentação (`client/weapons/`, `client/ui/`)
+
+- `RecoilView`: a câmara segue 45 % do recuo (`view_recoil_tracking`) mais
+  um pequeno kick por tiro (`weapon_recoil_view_punch_extra` 0,055, a decair
+  com `view_punch_decay` 18). Por isso o spray sobe acima do centro do ecrã.
+- `Crosshair`: mira dinâmica (como o estilo 7 do CS2). O gap é o cone de
+  imprecisão real projetado no ecrã. Segue o recuo e fica onde as balas vão
+  (`cl_crosshair_recoil`, ligado por defeito no CS2).
+- `WeaponViewModel`: AK graybox feita de caixas e cilindros, na camada
+  própria com FOV 60 a 4:3 (`viewmodel_fov`). Tem kick e clarão por tiro
+  (sempre visíveis pelo menos um frame, mesmo a FPS baixo), bob a andar,
+  sway ao rodar a vista e reload com o carregador a sair e a entrar.
+- `ImpactMarks`: buracos de bala orientados pela normal, num único
+  `InstancedMesh` com 128 marcas em anel.
+- `AmmoCounter`: munição e barra de reload. `?debug=weapon` mostra o painel
+  temporário da arma, e `?viewmodel=0` esconde a arma (`r_drawviewmodel 0`).
+
+### Aproximações conhecidas
+
+- O padrão de spray usa os parâmetros do CS2, mas um gerador aleatório
+  nosso. Tem o mesmo carácter (sobe, depois deriva), mas não é o desenho
+  exato da AK do CS.
+- `weapon_recoil_variance` e `m_flInaccuracyLand` foram interpretados por
+  nós. A imprecisão no ar é constante (o CS2 também tem `m_flInaccuracyJumpInitial/Apex`).
+- As variáveis de recuo (`weapon_recoil_*`, `view_recoil_tracking`) são os
+  valores do CS:GO, que o CS2 herdou e deixou de expor.
+- Sem sub-tick (o CS2 regista o instante exato do clique dentro do tick),
+  sem traçadoras, sem mãos no viewmodel, sem som.
+
 ## Mapas
 
 `MapDefinition` (shared) descreve a geometria estática como dados puros:
@@ -366,19 +513,19 @@ material por tipo de sólido.
 
 ## Onde entram os sistemas futuros
 
-Input, Player e a colisão já existem. O resto indica apenas onde cada sistema
-deve viver quando for pedido.
+Input, Player, armas (base) e a colisão já existem. O resto indica apenas
+onde cada sistema deve viver quando for pedido.
 
 | Sistema      | Lógica partilhada (`src/shared`)                     | Cliente (`src/client`)                                     |
 | ------------ | ---------------------------------------------------- | ---------------------------------------------------------- |
 | Input        | ✅ implementado: `shared/input/`                      | ✅ `input/`: teclado + rato. Falta touch e gamepad (ver [Input](#input)) |
 | Player       | ✅ `shared/player/`: movimento determinístico           | ✅ `player/`: simulação local e câmara em 1ª pessoa        |
-| Weapons      | dados e regras de armas, hitscan                     | `weapons/`: viewmodels, efeitos                            |
+| Weapons      | ✅ `shared/weapons/`: AK-47, recuo, precisão, hitscan; `shared/character/`: tick completo | ✅ `weapons/`: recuo na câmara, viewmodel, marcas. Faltam mais armas, hitboxes e dano |
 | Gameplay     | regras de ronda/modo, estado de jogo                 | ligação do estado à apresentação                           |
 | Physics      | ✅ `shared/physics/`: colisão AABB exata (sem Rapier)   | depuração visual                                           |
-| Networking   | protocolo, serialização, relógio de ticks            | `net/`: transporte; predição = reexecutar `simulatePlayerTick` a partir da correção |
+| Networking   | protocolo, serialização, relógio de ticks            | `net/`: transporte; predição = reexecutar `simulateCharacterTick` a partir da correção |
 | Audio        | —                                                    | `audio/`: Web Audio, som posicional                        |
-| UI           | —                                                    | `ui/`: HUD e menus em DOM, por cima do canvas              |
+| UI           | —                                                    | ✅ `ui/`: HUD em DOM (mira, munição). Faltam menus          |
 | Servidor     | reutiliza `src/shared`                               | novo `src/server/`, ou pacote próprio num monorepo          |
 
 Contas, matchmaking, ranked, inventário e anti-cheat são serviços de

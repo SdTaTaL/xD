@@ -87,3 +87,24 @@ describe('FirstPersonCamera', () => {
     expect(camera.position.y).toBeCloseTo(CONFIG.standingEyeHeight, 12);
   });
 });
+
+describe('FirstPersonCamera recoil offset', () => {
+  it('adds the view offset to the camera, and reports the view without it', () => {
+    const camera = new PerspectiveCamera();
+    const player = { previous: state({ yaw: 0.5, pitch: 0.2 }), current: state({ yaw: 0.5, pitch: 0.2 }) };
+    const alphas: number[] = [];
+    const fp = new FirstPersonCamera({
+      camera,
+      player,
+      config: CONFIG,
+      tickSeconds: TICK,
+      previewLook: () => ({ yaw: 0, pitch: 0 }),
+      viewOffset: (alpha) => (alphas.push(alpha), { yaw: 0.01, pitch: 0.03 }),
+    });
+    fp.update(frame(0.4));
+    expect(alphas.at(-1)).toBe(0.4);
+    expect(camera.rotation.x).toBeCloseTo(0.23, 12);
+    expect(camera.rotation.y).toBeCloseTo(-0.51, 12);
+    expect(fp.view).toEqual({ yaw: 0.5, pitch: 0.2 });
+  });
+});

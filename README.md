@@ -6,8 +6,11 @@ TypeScript + Vite + Three.js (WebGPU com fallback para WebGL 2).
 Estado atual: bootstrap, renderer, game loop com simulação a tick fixo, arena
 graybox com uma área de teste de movimento, iluminação, overlay de debug,
 sistema de input (um comando de input por tick, independente do dispositivo),
-e player controller determinístico com câmara em primeira pessoa. Ainda não há
-armas, rede, áudio nem UI de jogo, e isso é intencional (ver [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)).
+player controller determinístico com câmara em primeira pessoa, e a base de
+armas: uma AK-47 com os valores do CS2 (cadência, precisão, recuo, munição),
+tiros hitscan, mira dinâmica e arma em primeira pessoa. Ainda não há alvos,
+dano aplicado, rede, áudio nem menus, e isso é intencional (ver
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)).
 
 ## Requisitos
 
@@ -33,6 +36,8 @@ npm run preview     # servir o build de produção em http://localhost:4173
 | `?debug=0`        | Esconde o overlay de debug                               |
 | `?debug=input`    | Mostra também o painel **temporário** de debug do input  |
 | `?debug=player`   | Mostra o painel **temporário** do movimento (combinável: `?debug=input,player`) |
+| `?debug=weapon`   | Mostra o painel **temporário** da arma: munição, cadência, recuo, precisão, último impacto |
+| `?viewmodel=0`    | Esconde a arma em primeira pessoa (como `r_drawviewmodel 0` no CS) |
 | `?spawn=x,y,z,yaw`| Faz spawn nessa posição (yaw em graus), para testes reproduzíveis |
 
 ### Controlos (desktop)
@@ -42,8 +47,8 @@ Enquanto não há captura, nenhum input chega ao jogo. O jogador aparece na
 entrada da área de teste de movimento, a leste da arena.
 
 O movimento segue o modelo do CS2 (valores em `PlayerMovementConfig.ts`):
-corre por defeito a 250 u/s (6,35 m/s), `Shift` anda em silêncio a 52 % e
-agachado anda a 34 %. Fricção e aceleração do Source: largar as teclas
+corre por defeito à velocidade da arma (AK-47: 215 u/s = 5,46 m/s; faca:
+250 u/s), `Shift` anda em silêncio a 52 % e agachado anda a 34 %. Fricção e aceleração do Source: largar as teclas
 demora ~0,4 s a parar, carregar na direção oposta (counter-strafe) trava em
 ~0,1 s. No ar, virar a vista enquanto se faz strafe ganha velocidade (air
 strafing). Saltar e aterrar cansa: velocidade reduzida durante um instante,
@@ -56,13 +61,21 @@ o que torna o bunny hop pouco eficaz.
 | `Espaço`              | saltar                     |
 | `Ctrl`                | agachar                    |
 | `Shift`               | andar (silencioso)         |
-| `R`                   | reload (sem efeito ainda)  |
-| Botão esquerdo        | fire (sem efeito ainda)    |
-| Botão direito         | aim (sem efeito ainda)     |
+| Botão esquerdo        | disparar (automático: segurar) |
+| `R`                   | recarregar                 |
+| Botão direito         | aim (sem efeito: a AK-47 não tem mira) |
 
 Um salto normal sobe 57 u (1,45 m). Saltar e agachar no ar (ou premir os
 dois ao mesmo tempo) é um crouch-jump: chega a caixas de 64 u (1,63 m), como
 no CS.
+
+A AK-47 dispara a 600 balas por minuto, 30 no carregador e 90 de reserva,
+recarrega em 2,47 s (e sozinha ao disparar com o carregador vazio). Como no
+CS: o primeiro tiro parado é preciso, a correr ou no ar os tiros vão para
+todo o lado, abaixo de 34 % da velocidade (counter-strafe, agachado a andar)
+volta a ser preciso, e o spray segue sempre o mesmo padrão de recuo (sobe e
+depois vai para os lados), que se aprende a compensar puxando o rato. A mira
+abre com a imprecisão real e acompanha o recuo (onde as balas vão).
 
 ## Estrutura
 
@@ -77,14 +90,16 @@ docs/ARCHITECTURE.md        arquitetura, regras de dependência e evolução pre
 src/
   main.ts                   entry point: arranque, política de perda de GPU, ecrã de erro
   shared/                   lógica independente de motor/DOM (reutilizável por um servidor)
-    math/Vec3.ts            vetor simples (sem Three.js)
+    math/                   Vec3 simples (sem Three.js); seno, cosseno, exp e números aleatórios determinísticos
     simulation/SimulationConfig.ts  tick rate autoritativo (64 Hz)
     time/FixedTimestep.ts   acumulador de passo fixo (sem relógio próprio)
     maps/MapDefinition.ts   formato de dados de mapas (sólidos AABB) + bounds
     maps/grayboxArena.ts    arena graybox simétrica
     input/                  InputAction, InputCommand (contrato de rede), histórico por tick
-    physics/                colisão AABB: sweeps por eixo, overlap, saída de penetração
+    physics/                colisão AABB: sweeps por eixo, overlap, saída de penetração, raycast
     player/                 player controller determinístico (estado, config, movimento, colisão)
+    weapons/                armas: dados (AK-47 do CS2), recuo, precisão, disparo, reload, hitscan
+    character/              tick completo de um jogador: movimento + arma (o que a predição/servidor repetem)
   client/
     app/                    composition root (ClientApp), configuração, ecrã de erro fatal
     core/                   contrato GameSystem, scheduler de fases, game loop, logger
@@ -92,9 +107,11 @@ src/
       adapters/             dispositivo → input abstrato (teclado+rato; touch/gamepad no futuro)
       devices/              eventos do browser, Pointer Lock, focus/visibility
     player/                 simulação do jogador local por tick, câmara em primeira pessoa
+    weapons/                apresentação da arma: recuo na câmara, arma em 1ª pessoa, marcas de bala
+    ui/                     HUD em DOM: mira dinâmica, munição
     rendering/              renderer WebGPU/WebGL 2, viewport/resize, câmara, materiais TSL
     world/                  vista do mapa (malhas) e iluminação
-    debug/                  estatísticas de frame, overlay de debug, painéis temporários (input, player)
+    debug/                  estatísticas de frame, overlay de debug, painéis temporários (input, player, weapon)
     styles/                 CSS global
 ```
 

@@ -5,6 +5,8 @@ import { DEFAULT_PLAYER_MOVEMENT as CONFIG } from '@shared/player/PlayerMovement
 import type { PlayerState } from '@shared/player/PlayerState';
 import { SIMULATION_TICK_RATE, SIMULATION_TICK_SECONDS } from '@shared/simulation/SimulationConfig';
 import { FixedTimestep } from '@shared/time/FixedTimestep';
+import { AK47 } from '@shared/weapons/WeaponDefinition';
+import { DEFAULT_WEAPON_RULES } from '@shared/weapons/WeaponRules';
 import { DEFAULT_KEYBOARD_MOUSE_BINDINGS, KeyboardMouseAdapter } from '../input/adapters/KeyboardMouseAdapter';
 import { InputSystem } from '../input/InputSystem';
 import { FakeKeyboardMouseDevice } from '../input/test-support/FakeKeyboardMouseDevice';
@@ -20,7 +22,7 @@ function createClient() {
   );
   const player = new LocalPlayerSystem({
     commands: input.commands,
-    context: { world: WORLD, config: CONFIG, tickSeconds: SIMULATION_TICK_SECONDS },
+    context: { world: WORLD, weapon: AK47, rules: DEFAULT_WEAPON_RULES, movement: CONFIG, tickSeconds: SIMULATION_TICK_SECONDS, spreadSeed: 1 },
     spawn: { position: { x: 0, y: 0, z: 0 }, yaw: 0 },
   });
   return { input, kbm, player };
@@ -34,8 +36,15 @@ type Event = (kbm: KeyboardMouseAdapter) => void;
  * Key events are scheduled on ticks; mouse motion arrives every frame,
  * proportional to the frame's duration.
  */
-function run(fps: number, seconds: number, keys: ReadonlyMap<number, Event>, mouseCountsPerSecond: number): { state: PlayerState; pendingYaw: number } {
+function run(
+  fps: number,
+  seconds: number,
+  keys: ReadonlyMap<number, Event>,
+  mouseCountsPerSecond: number,
+): { state: PlayerState; pendingYaw: number; shotTicks: number[] } {
   const { input, kbm, player } = createClient();
+  const shotTicks: number[] = [];
+  player.onShot((shot) => shotTicks.push(shot.tick));
   const timestep = new FixedTimestep(SIMULATION_TICK_RATE, 8);
   const tick = { tick: 0, deltaSeconds: SIMULATION_TICK_SECONDS };
   for (let frame = 0; frame < fps * seconds; frame++) {
@@ -49,7 +58,7 @@ function run(fps: number, seconds: number, keys: ReadonlyMap<number, Event>, mou
       player.fixedUpdate(tick);
     });
   }
-  return { state: player.current, pendingYaw: input.previewLook(0).yaw };
+  return { state: player.current, pendingYaw: input.previewLook(0).yaw, shotTicks };
 }
 
 describe('LocalPlayerSystem', () => {
@@ -76,6 +85,18 @@ describe('LocalPlayerSystem', () => {
     const reference = run(60, 2.5, keys, 0).state;
     for (const fps of [30, 144, 240]) expect(run(fps, 2.5, keys, 0).state).toEqual(reference);
     expect(reference.position.z).toBeLessThan(-3); // it did move
+  });
+
+  it('fires on the same ticks at any frame rate while the mouse button is held', () => {
+    const keys = new Map<number, Event>([
+      [10, (k) => k.buttonDown('left')],
+      [74, (k) => k.buttonUp('left')],
+      [100, (k) => (k.buttonDown('left'), k.buttonUp('left'))], // a click shorter than a tick still fires
+    ]);
+    const reference = run(60, 2, keys, 0).shotTicks;
+    // 600 rounds per minute: 10 shots in the 64 ticks held, then the tap.
+    expect(reference).toEqual([10, 17, 23, 30, 36, 42, 49, 55, 62, 68, 100]);
+    for (const fps of [30, 144, 240]) expect(run(fps, 2, keys, 0).shotTicks).toEqual(reference);
   });
 
   it('loses and duplicates no mouse motion at any frame rate', () => {
@@ -115,7 +136,8 @@ describe('first-person view smoothness (no jitter)', () => {
       // After the ~0.55 s acceleration, every frame moves by the same distance.
       const steps = xs.slice(fps * 0.75).map((x, i, all) => (i === 0 ? null : x - all[i - 1]!)).slice(1) as number[];
       expect(steps.length).toBeGreaterThan(fps / 2);
-      for (const step of steps) expect(step).toBeCloseTo(CONFIG.maxSpeed / fps, 9);
+      // Running speed with the AK-47 in hand.
+      for (const step of steps) expect(step).toBeCloseTo(AK47.maxSpeed / fps, 9);
     }
   });
 

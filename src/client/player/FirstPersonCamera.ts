@@ -1,5 +1,6 @@
 import type { PerspectiveCamera } from 'three/webgpu';
 import { clamp, lerp, moveTowards } from '@shared/math/scalar';
+import type { ViewAngles } from '@shared/player/look';
 import type { PlayerMovementConfig } from '@shared/player/PlayerMovementConfig';
 import { eyePosition, type PlayerState } from '@shared/player/PlayerState';
 import type { FrameContext, GameSystem } from '../core/GameSystem';
@@ -18,7 +19,11 @@ export interface FirstPersonCameraOptions {
   readonly tickSeconds: number;
   /** Look input not yet committed to a tick (see InputSystem.previewLook). */
   readonly previewLook: (elapsedSinceTickSeconds: number) => LookDelta;
+  /** Extra rotation on top of the view, e.g. weapon recoil (see RecoilView). */
+  readonly viewOffset?: (alpha: number) => ViewAngles;
 }
+
+const NO_OFFSET: ViewAngles = Object.freeze({ yaw: 0, pitch: 0 });
 
 /**
  * Speed at which the view catches up after a step up or down, m/s. A 0.35 m
@@ -39,6 +44,7 @@ const MAX_STEP_OFFSET = 0.5;
  *   next tick commits the same rotation, so there is no jump.
  * - Steps: grounded height changes (stairs, curbs) are eased over a few
  *   frames instead of popping.
+ * - Recoil: an optional view offset is added on top of the view angles.
  */
 export class FirstPersonCamera implements GameSystem {
   readonly name = 'first-person-camera';
@@ -48,6 +54,8 @@ export class FirstPersonCamera implements GameSystem {
   private readonly config: PlayerMovementConfig;
   private readonly tickSeconds: number;
   private readonly previewLook: (elapsedSinceTickSeconds: number) => LookDelta;
+  private readonly viewOffset: (alpha: number) => ViewAngles;
+  private currentView: ViewAngles = NO_OFFSET;
 
   private lastSeen: PlayerState | null = null;
   /** Grounded feet height change of the latest tick, excluded from interpolation. */
@@ -61,8 +69,14 @@ export class FirstPersonCamera implements GameSystem {
     this.config = options.config;
     this.tickSeconds = options.tickSeconds;
     this.previewLook = options.previewLook;
+    this.viewOffset = options.viewOffset ?? (() => NO_OFFSET);
     this.camera.rotation.order = 'YXZ';
     this.place(1, 0);
+  }
+
+  /** The player's view (yaw, pitch) shown this frame, before the view offset. */
+  get view(): ViewAngles {
+    return this.currentView;
   }
 
   update(frame: FrameContext): void {
@@ -89,6 +103,9 @@ export class FirstPersonCamera implements GameSystem {
 
     const look = this.previewLook(alpha * this.tickSeconds);
     const pitch = clamp(current.pitch + look.pitch, -this.config.maxPitch, this.config.maxPitch);
-    this.camera.rotation.set(pitch, -(current.yaw + look.yaw), 0);
+    const yaw = current.yaw + look.yaw;
+    this.currentView = { yaw, pitch };
+    const offset = this.viewOffset(alpha);
+    this.camera.rotation.set(pitch + offset.pitch, -(yaw + offset.yaw), 0);
   }
 }

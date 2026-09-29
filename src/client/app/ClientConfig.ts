@@ -17,12 +17,33 @@ export interface InputSettings {
   readonly rawMouseInput: boolean;
 }
 
+/**
+ * How recoil and the weapon look on screen. Presentation only: none of this
+ * changes where bullets go. Defaults are CS2's.
+ */
+export interface WeaponViewSettings {
+  /** Share of the recoil (aim punch × recoil scale) the camera follows. CS `view_recoil_tracking` 0.45. */
+  readonly viewRecoilTracking: number;
+  /** Screen kick per shot, as a fraction of the recoil kick. CS `weapon_recoil_view_punch_extra` 0.055. */
+  readonly viewPunchExtra: number;
+  /** Exponential decay rate of the screen kick, 1/s. CS2 `view_punch_decay` 18. */
+  readonly viewPunchDecay: number;
+  /** The crosshair shows where bullets go, recoil included. CS2 `cl_crosshair_recoil` (default on). */
+  readonly crosshairFollowsRecoil: boolean;
+  /** Horizontal field of view of the weapon model at 4:3, degrees. CS2 `viewmodel_fov` 60. */
+  readonly viewmodelFovDegrees: number;
+  /** Show the first-person weapon model. CS `r_drawviewmodel` 1. */
+  readonly drawViewModel: boolean;
+}
+
 export interface DebugSettings {
   readonly overlay: boolean;
   /** Temporary input debug panel. */
   readonly input: boolean;
   /** Temporary player movement debug panel. */
   readonly player: boolean;
+  /** Temporary weapon debug panel. */
+  readonly weapon: boolean;
   /** Development override of the spawn pose, for reproducible tests. */
   readonly spawn: SpawnPose | null;
 }
@@ -32,6 +53,7 @@ export interface ClientConfig {
   readonly camera: ViewCameraSettings;
   readonly loop: LoopSettings;
   readonly input: InputSettings;
+  readonly weaponView: WeaponViewSettings;
   readonly debug: DebugSettings;
 }
 
@@ -57,10 +79,19 @@ const DEFAULT_CONFIG: ClientConfig = {
     invertMouseY: false,
     rawMouseInput: true,
   },
+  weaponView: {
+    viewRecoilTracking: 0.45,
+    viewPunchExtra: 0.055,
+    viewPunchDecay: 18,
+    crosshairFollowsRecoil: true,
+    viewmodelFovDegrees: 60,
+    drawViewModel: true,
+  },
   debug: {
     overlay: true,
     input: false,
     player: false,
+    weapon: false,
     spawn: null,
   },
 };
@@ -85,9 +116,10 @@ export function withRendererBackend(config: ClientConfig, backend: RendererBacke
  *
  * - `?renderer=webgl` forces the WebGL 2 backend.
  * - `?debug=0` hides the debug overlay.
- * - `?debug=input`, `?debug=player` or `?debug=input,player` also show the
- *   (temporary) input / player debug panels.
+ * - `?debug=input`, `?debug=player`, `?debug=weapon` (or a list such as
+ *   `?debug=input,player`) also show the temporary debug panels.
  * - `?spawn=x,y,z,yawDegrees` spawns the player there instead of the map spawn.
+ * - `?viewmodel=0` hides the first-person weapon model (CS `r_drawviewmodel 0`).
  */
 export function resolveClientConfig(search: string): ClientConfig {
   const params = new URLSearchParams(search);
@@ -99,10 +131,15 @@ export function resolveClientConfig(search: string): ClientConfig {
       ...DEFAULT_CONFIG.renderer,
       backend: params.get('renderer') === 'webgl' ? 'webgl' : DEFAULT_CONFIG.renderer.backend,
     },
+    weaponView: {
+      ...DEFAULT_CONFIG.weaponView,
+      drawViewModel: params.get('viewmodel') === '0' ? false : DEFAULT_CONFIG.weaponView.drawViewModel,
+    },
     debug: {
       overlay: debug.has('0') ? false : DEFAULT_CONFIG.debug.overlay,
       input: debug.has('input') || DEFAULT_CONFIG.debug.input,
       player: debug.has('player') || DEFAULT_CONFIG.debug.player,
+      weapon: debug.has('weapon') || DEFAULT_CONFIG.debug.weapon,
       spawn: parseSpawn(params.get('spawn')) ?? DEFAULT_CONFIG.debug.spawn,
     },
   };

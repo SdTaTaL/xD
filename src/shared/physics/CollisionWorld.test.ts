@@ -65,3 +65,47 @@ describe('CollisionWorld overlap and penetration', () => {
     expect(map.solids[0]?.max[1]).toBe(0);
   });
 });
+
+describe('CollisionWorld.raycast', () => {
+  const world = new CollisionWorld([aabb(5, 0, -1, 6, 2, 1), aabb(8, 0, -1, 9, 2, 1), aabb(-10, -1, -10, 10, 0, 10)]);
+
+  it('hits the nearest face with its outward normal and an exact point', () => {
+    const hit = world.raycast({ x: 0, y: 1, z: 0 }, { x: 1, y: 0, z: 0 }, 100);
+    expect(hit).toEqual({ distance: 5, point: { x: 5, y: 1, z: 0 }, normal: { x: -1, y: 0, z: 0 }, solid: 0 });
+  });
+
+  it('hits the floor from above', () => {
+    const down = { x: 0, y: -Math.SQRT1_2, z: Math.SQRT1_2 };
+    const hit = world.raycast({ x: 0, y: 1, z: 0 }, down, 100);
+    expect(hit?.solid).toBe(2);
+    expect(hit?.normal).toEqual({ x: 0, y: 1, z: 0 });
+    expect(hit?.point.y).toBe(0);
+    expect(hit?.point.z).toBeCloseTo(1, 12);
+    expect(hit?.distance).toBeCloseTo(Math.SQRT2, 12);
+  });
+
+  it('misses beyond the maximum distance and when nothing is in the way', () => {
+    expect(world.raycast({ x: 0, y: 1, z: 0 }, { x: 1, y: 0, z: 0 }, 4.9)).toBeNull();
+    expect(world.raycast({ x: 0, y: 1, z: 0 }, { x: 0, y: 1, z: 0 }, 100)).toBeNull();
+    expect(world.raycast({ x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 1 }, 100)).toBeNull();
+  });
+
+  it('does not count grazing a face, and ignores a solid that contains the origin', () => {
+    // Along the top face of the first box (y = 2): parallel and touching only.
+    expect(world.raycast({ x: 0, y: 2, z: 0 }, { x: 1, y: 0, z: 0 }, 100)).toBeNull();
+    // Starting inside the first box, the next box is the first hit.
+    expect(world.raycast({ x: 5.5, y: 1, z: 0 }, { x: 1, y: 0, z: 0 }, 100)?.solid).toBe(1);
+  });
+
+  it('hits the far side of a box when shooting back towards the origin', () => {
+    const hit = world.raycast({ x: 20, y: 1, z: 0 }, { x: -1, y: 0, z: 0 }, 100);
+    expect(hit).toMatchObject({ distance: 11, normal: { x: 1, y: 0, z: 0 }, solid: 1 });
+  });
+
+  it('is exact against the real map: the lab east wall from the entrance', () => {
+    const map = CollisionWorld.fromMap(GRAYBOX_ARENA);
+    const hit = map.raycast({ x: 26.5, y: 3, z: 11 }, { x: 1, y: 0, z: 0 }, 208);
+    expect(hit?.point).toEqual({ x: 49, y: 3, z: 11 });
+    expect(hit?.distance).toBe(22.5);
+  });
+});

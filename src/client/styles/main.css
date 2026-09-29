@@ -72,3 +72,107 @@ body {
   opacity: 0.6;
   font-size: 14px;
 }
+
+/* --- HUD ------------------------------------------------------------------ */
+
+.crosshair {
+  --gap: 3px;
+  --length: 8px;
+  --thickness: 2px;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  will-change: transform;
+}
+
+.crosshair__bar {
+  position: absolute;
+  background: rgb(50 250 50);
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 70%);
+}
+
+.crosshair__bar--top,
+.crosshair__bar--bottom {
+  left: calc(var(--thickness) / -2);
+  width: var(--thickness);
+  height: var(--length);
+}
+
+.crosshair__bar--top {
+  top: calc(-1 * (var(--gap) + var(--length)));
+}
+
+.crosshair__bar--bottom {
+  top: var(--gap);
+}
+
+.crosshair__bar--left,
+.crosshair__bar--right {
+  top: calc(var(--thickness) / -2);
+  width: var(--length);
+  height: var(--thickness);
+}
+
+.crosshair__bar--left {
+  left: calc(-1 * (var(--gap) + var(--length)));
+}
+
+.crosshair__bar--right {
+  left: var(--gap);
+}
+
+.ammo {
+  position: absolute;
+  right: 24px;
+  bottom: 20px;
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: baseline;
+  column-gap: 8px;
+  color: #f2f2f2;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 80%);
+  pointer-events: none;
+  user-select: none;
+}
+
+.ammo__weapon {
+  grid-column: 1 / -1;
+  justify-self: end;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.ammo__magazine {
+  font-size: 34px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.ammo__reserve {
+  font-size: 18px;
+  opacity: 0.8;
+}
+
+.ammo--empty .ammo__magazine {
+  color: #ff5a4a;
+}
+
+.ammo__reload {
+  grid-column: 1 / -1;
+  height: 3px;
+  margin-top: 4px;
+  background: #f2f2f2;
+  transform: scaleX(0);
+  transform-origin: left;
+  opacity: 0;
+}
+
+.ammo--reloading .ammo__reload {
+  opacity: 0.85;
+}
