@@ -13,7 +13,7 @@ import {
 
 describe('InputAction', () => {
   it('assigns each action a distinct, stable bit in declaration order', () => {
-    expect(INPUT_ACTIONS).toEqual(['jump', 'crouch', 'sprint', 'fire', 'aim', 'reload']);
+    expect(INPUT_ACTIONS).toEqual(['jump', 'crouch', 'walk', 'fire', 'aim', 'reload']);
     INPUT_ACTIONS.forEach((action, index) => expect(actionBit(action)).toBe(1 << index));
     expect(ALL_ACTIONS_MASK).toBe(0b111111);
     expect(actionsIn(actionBit('fire') | actionBit('jump'))).toEqual(['jump', 'fire']);
@@ -70,9 +70,9 @@ describe('createInputCommand', () => {
   });
 
   it('distinguishes held (continuous) from pressed (one-shot) actions', () => {
-    const command = createInputCommand({ tick: 0, moveX: 0, moveY: 0, lookX: 0, lookY: 0, held: actionBit('sprint'), pressed: actionBit('jump') });
-    expect(isActionHeld(command, 'sprint')).toBe(true);
-    expect(wasActionPressed(command, 'sprint')).toBe(false);
+    const command = createInputCommand({ tick: 0, moveX: 0, moveY: 0, lookX: 0, lookY: 0, held: actionBit('walk'), pressed: actionBit('jump') });
+    expect(isActionHeld(command, 'walk')).toBe(true);
+    expect(wasActionPressed(command, 'walk')).toBe(false);
     expect(isActionHeld(command, 'jump')).toBe(false);
     expect(wasActionPressed(command, 'jump')).toBe(true);
   });

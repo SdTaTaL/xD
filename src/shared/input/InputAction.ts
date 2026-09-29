@@ -5,7 +5,7 @@
  * makes it part of the network format: append new actions, never reorder or
  * remove existing ones.
  */
-export const INPUT_ACTIONS = ['jump', 'crouch', 'sprint', 'fire', 'aim', 'reload'] as const;
+export const INPUT_ACTIONS = ['jump', 'crouch', 'walk', 'fire', 'aim', 'reload'] as const;
 
 export type InputAction = (typeof INPUT_ACTIONS)[number];
 

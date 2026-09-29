@@ -104,7 +104,7 @@ export class PlayerDebugPanel implements GameSystem {
     const c = this.player.command;
     const list = (mask: number): string => actionsIn(mask).join(' ') || '—';
     const stance = s.crouched ? 'crouched' : 'standing';
-    const gait = s.sprinting ? 'sprint' : s.crouched ? 'crouch' : 'walk';
+    const gait = s.crouched ? 'crouch' : s.walking ? 'walk' : 'run';
 
     this.element.textContent = [
       'PLAYER (temporary debug)',
@@ -112,7 +112,7 @@ export class PlayerDebugPanel implements GameSystem {
       `Position  x ${s.position.x.toFixed(3)}  y ${s.position.y.toFixed(3)}  z ${s.position.z.toFixed(3)}`,
       `Velocity  x ${signed(s.velocity.x, 3)}  y ${signed(s.velocity.y, 3)}  z ${signed(s.velocity.z, 3)}`,
       `Speed     ${horizontalSpeed(s).toFixed(2)} m/s  (max 1 s ${Math.max(0, ...this.speeds).toFixed(2)})`,
-      `State     ${s.grounded ? 'grounded' : 'airborne'}  ${stance}  ${gait}`,
+      `State     ${s.grounded ? 'grounded' : 'airborne'}  ${stance}  ${gait}  stamina ${s.stamina.toFixed(2)}`,
       `Eye       ${eyeHeight(s, this.config).toFixed(3)} m  (crouch ${s.crouchAmount.toFixed(2)})`,
       `View      yaw ${signed(s.yaw * DEGREES_PER_RADIAN, 2)}°  pitch ${signed(s.pitch * DEGREES_PER_RADIAN, 2)}°`,
       `Command   move ${signed(c?.moveX ?? 0, 2)} ${signed(c?.moveY ?? 0, 2)}  held ${list(c?.held ?? 0)}  pressed ${list(c?.pressed ?? 0)}`,

@@ -1,11 +1,13 @@
 import { isActionHeld, wasActionPressed, type InputCommand } from '../input/InputCommand';
+import { clamp } from '../math/scalar';
 import type { CollisionWorld } from '../physics/CollisionWorld';
 import { updateStance } from './crouch';
-import { accelerateAir, accelerateGround, isSprinting, stanceSpeed, wishVelocity } from './horizontal';
+import { airMove, groundMove, stanceSpeed, wishVelocity, type Planar } from './horizontal';
 import { Body, groundDistance, moveHorizontal } from './kinematics';
 import { applyLook } from './look';
 import { jumpBufferTicks, jumpVelocity, type PlayerMovementConfig } from './PlayerMovementConfig';
 import { freezeState, hullHeight, type PlayerState } from './PlayerState';
+import { recoverStamina, spendStamina, staminaSpeedFactor } from './stamina';
 import { integrateGravity, nextJumpBuffer } from './vertical';
 
 /** Everything besides the state and the command that a tick depends on. */
@@ -23,7 +25,14 @@ export interface PlayerSimulationContext {
 const GROUND_CONTACT_DISTANCE = 0.01;
 
 /**
- * Advances one player by one simulation tick.
+ * Landings count (and cost stamina) only when falling at least this fast,
+ * m/s. A jump lands at ~7.7 m/s; spawning on the floor or stepping does not count.
+ */
+const LANDING_IMPACT_SPEED = 1;
+
+/**
+ * Advances one player by one simulation tick, following the Source / CS2
+ * movement model (see PlayerMovementConfig).
  *
  * Pure and deterministic: the result depends only on the arguments, which
  * are never mutated. The same initial state and the same commands therefore
@@ -32,13 +41,14 @@ const GROUND_CONTACT_DISTANCE = 0.01;
  *
  * Order within a tick:
  * 1. depenetration safety net
- * 2. view (yaw/pitch)
- * 3. jump decision (buffered press + grounded at the start of the tick)
+ * 2. view (yaw/pitch) and stamina recovery
+ * 3. jump decision (a press, grounded at the start of the tick)
  * 4. stance (crouch/stand, hull resize); on a take-off tick it follows air rules
- * 5. horizontal acceleration (ground or air rules, from the start-of-tick grounded state)
- * 6. gravity
+ * 5. horizontal: ground friction + acceleration, or air acceleration. A jump
+ *    tick is an air tick (no friction), as in Source; fatigue trims the speed.
+ * 6. gravity (and the jump impulse)
  * 7. horizontal collide-and-slide (with step climbing on the ground), then vertical movement
- * 8. ground detection and snapping
+ * 8. ground detection and snapping; landing costs stamina
  */
 export function simulatePlayerTick(previous: PlayerState, command: InputCommand, context: PlayerSimulationContext): PlayerState {
   const { world, config, tickSeconds: dt } = context;
@@ -50,8 +60,9 @@ export function simulatePlayerTick(previous: PlayerState, command: InputCommand,
   body.y += push.y;
   body.z += push.z;
 
-  // 2. View.
+  // 2. View and fatigue recovery.
   const view = applyLook(previous.yaw, previous.pitch, command.lookX, command.lookY, config.maxPitch);
+  let stamina = recoverStamina(previous.stamina, config, dt);
 
   // 3. Jump decision.
   let jumpBuffer = nextJumpBuffer(previous.jumpBufferTicks, wasActionPressed(command, 'jump'), jumpBufferTicks(config, dt));
@@ -63,38 +74,35 @@ export function simulatePlayerTick(previous: PlayerState, command: InputCommand,
   const stance = updateStance(world, body, previous, isActionHeld(command, 'crouch'), previous.grounded && !jumped, config, dt);
 
   // 5. Horizontal velocity.
-  const sprinting = isSprinting(command.moveX, command.moveY, stance.crouched, isActionHeld(command, 'sprint'), config);
-  const wish = wishVelocity(command.moveX, command.moveY, view.yaw, stanceSpeed(stance.crouched, sprinting, config));
-  const planar = { x: previous.velocity.x, z: previous.velocity.z };
-  const accelerate = previous.grounded ? accelerateGround : accelerateAir;
-  let horizontal = accelerate(planar, wish, config, dt);
+  const walking = isActionHeld(command, 'walk') && !stance.crouched;
+  const speedLimit = config.maxSpeed * staminaSpeedFactor(stamina, config);
+  const wish = wishVelocity(command.moveX, command.moveY, view.yaw, stanceSpeed(stance.crouched, walking, speedLimit, config));
+  let planar: Planar = { x: previous.velocity.x, z: previous.velocity.z };
+
+  if (jumped) {
+    const kept = staminaSpeedFactor(stamina, config);
+    planar = { x: planar.x * kept, z: planar.z * kept };
+    stamina = spendStamina(stamina, config.jumpStaminaCost);
+  }
+  const horizontal = previous.grounded && !jumped ? groundMove(planar, wish, speedLimit, config, dt) : airMove(planar, wish, config, dt);
 
   // 6. Gravity (and the jump impulse).
   let velocityY = jumped ? jumpVelocity(config) : previous.grounded ? 0 : previous.velocity.y;
   let displacementY = 0;
   if (jumped || !previous.grounded) {
-    const step = integrateGravity(velocityY, config.gravity, dt, config.maxFallSpeed);
+    const step = integrateGravity(velocityY, config.gravity, dt, config.maxVelocity);
     displacementY = step.displacement;
     velocityY = step.velocity;
   }
 
   // 7. Move: horizontal first (so a rising jump can clear a ledge), then vertical.
+  const velocityXLimited = clamp(horizontal.x, -config.maxVelocity, config.maxVelocity);
+  const velocityZLimited = clamp(horizontal.z, -config.maxVelocity, config.maxVelocity);
   const onGround = previous.grounded && !jumped;
-  const moved = moveHorizontal(world, body, horizontal.x * dt, horizontal.z * dt, onGround, config.stepHeight);
-  if (moved.blockedX || moved.blockedZ) {
-    // Against a wall only the wall-parallel part of the input counts. Re-derive
-    // the velocity from it so sliding accelerates at the full rate instead of
-    // wasting acceleration on the blocked axis.
-    const along = (value: number, blocked: boolean): number => (blocked ? 0 : value);
-    horizontal = accelerate(
-      { x: along(planar.x, moved.blockedX), z: along(planar.z, moved.blockedZ) },
-      { x: along(wish.x, moved.blockedX), z: along(wish.z, moved.blockedZ) },
-      config,
-      dt,
-    );
-  }
-  const velocityX = moved.blockedX ? 0 : horizontal.x;
-  const velocityZ = moved.blockedZ ? 0 : horizontal.z;
+  const moved = moveHorizontal(world, body, velocityXLimited * dt, velocityZLimited * dt, onGround, config.stepHeight);
+  // Blocked axes lose their velocity: sliding along a wall keeps only the parallel part.
+  const velocityX = moved.blockedX ? 0 : velocityXLimited;
+  const velocityZ = moved.blockedZ ? 0 : velocityZLimited;
 
   if (body.sweep(world, 1, displacementY) !== displacementY) velocityY = 0; // landed or hit a ceiling
 
@@ -109,6 +117,9 @@ export function simulatePlayerTick(previous: PlayerState, command: InputCommand,
       velocityY = 0;
     }
   }
+  if (grounded && !previous.grounded && previous.velocity.y <= -LANDING_IMPACT_SPEED) {
+    stamina = spendStamina(stamina, config.landStaminaCost);
+  }
 
   return freezeState({
     position: body.position,
@@ -118,7 +129,8 @@ export function simulatePlayerTick(previous: PlayerState, command: InputCommand,
     grounded,
     crouched: stance.crouched,
     crouchAmount: stance.crouchAmount,
-    sprinting,
+    walking,
+    stamina,
     jumpBufferTicks: jumpBuffer,
   });
 }

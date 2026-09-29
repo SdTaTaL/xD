@@ -1,99 +1,139 @@
 /**
+ * Source / Counter-Strike units to meters: the CS player is 72 units tall
+ * (1.83 m), i.e. 1 unit = 1 inch = 0.0254 m.
+ */
+export const SOURCE_UNIT = 0.0254;
+
+/**
  * Tunable movement parameters. Units: meters, seconds, radians.
  *
- * These are the initial tuning for a responsive, readable competitive feel:
- * quick starts and stops, no momentum tricks, committed jumps. Each value
- * states why it was chosen and what it implies at the 64 Hz tick rate, so
- * later tuning can be deliberate. Change them here, never in the controller.
+ * The defaults reproduce Counter-Strike 2's movement model (the reference
+ * the genre shares with Standoff 2 and Critical Ops): values come from CS2's
+ * console variables and player dimensions, converted to meters. Where CS2
+ * behaviour is not public (stamina), the value is our own approximation and
+ * says so. Tune here, never in the controller.
  */
 export interface PlayerMovementConfig {
   // --- Collision hull -------------------------------------------------------
-  /** Half the hull width. 0.3 m → 0.6 m wide: fits 0.65 m gaps and 1 m doors comfortably. */
+  /** Half the hull width. CS: 32 × 32 units → 0.4064 m. */
   readonly radius: number;
-  /** Standing hull height. 1.8 m: an average adult. */
+  /** Standing hull height. CS: 72 units → 1.8288 m. */
   readonly standingHeight: number;
-  /** Crouched hull height. 1.3 m (72 % of standing): hides behind ~1.3 m cover, fits 1.5 m tunnels. */
+  /** Crouched hull height. CS: 54 units → 1.3716 m. */
   readonly crouchingHeight: number;
   /**
-   * Eye height when standing / crouched. Both sit 0.18 m below the top of
-   * their hull, so crouching in the air (head fixed, legs tucked) keeps the
-   * view perfectly still.
+   * Eye height standing / crouched. CS: 64 / 46 units → 1.6256 / 1.1684 m.
+   * Both are 8 units below the top of their hull, so crouching in the air
+   * (head fixed, legs tucked) keeps the view still.
    */
   readonly standingEyeHeight: number;
   readonly crouchingEyeHeight: number;
-  /** Time for the view to move between standing and crouched eye height on the ground. */
+  /** Time for the view to move between standing and crouched eye height on the ground (approximation). */
   readonly crouchTransitionSeconds: number;
 
-  // --- Horizontal speed -----------------------------------------------------
-  /** Default ground speed. 4.8 m/s: crosses the 48 m arena in 10 s. */
-  readonly walkSpeed: number;
-  /** Sprint speed (+33 %). 6.4 m/s: a clear rotation boost without outrunning information. */
-  readonly sprintSpeed: number;
-  /** Crouched speed (40 % of walk). 1.9 m/s: precise peeking, clearly a commitment. */
-  readonly crouchSpeed: number;
+  // --- Speed ----------------------------------------------------------------
   /**
-   * Sprint needs at least this much forward component in the move direction
-   * (0.5 = within 60° of forward): W and W+A/D sprint, pure strafes and
-   * backpedals never do.
+   * Running speed with the lightest equipment (knife). CS: 250 units/s →
+   * 6.35 m/s. Weapons will lower it (e.g. AK-47 215 u/s = 5.46 m/s).
    */
-  readonly sprintMinForward: number;
+  readonly maxSpeed: number;
+  /** Walk (Shift, silent) speed as a fraction of the max speed. CS: 0.52 (knife: 3.30 m/s). */
+  readonly walkSpeedScale: number;
+  /** Crouched speed as a fraction of the max speed. CS: 0.34 (knife: 2.16 m/s). */
+  readonly crouchSpeedScale: number;
 
-  // --- Acceleration ---------------------------------------------------------
-  /** Ground acceleration towards the wish velocity. 50 m/s²: 0 → walk speed in 0.096 s (7 ticks). */
-  readonly groundAcceleration: number;
+  // --- Ground (Source friction + acceleration) ------------------------------
+  /** Ground friction. CS `sv_friction` 5.2: speed decays ~5.2 × speed per second. */
+  readonly friction: number;
   /**
-   * Ground deceleration when stopping, braking or over the speed limit.
-   * 70 m/s²: walk → 0 in 0.069 s (5 ticks, ~0.19 m). Stops are crisp, so
-   * standing still to shoot never needs counter-strafing tricks.
+   * Below this speed friction acts as if moving at it, so slow movement stops
+   * in finite time. CS `sv_stopspeed` 80 u/s → 2.032 m/s.
    */
-  readonly groundDeceleration: number;
+  readonly stopSpeed: number;
   /**
-   * Air control. 5 m/s²: about 3 m/s of steering over a full jump, enough to
-   * correct, not to reverse. Air control only steers: it never adds speed
-   * beyond the current speed or the mode's limit, so strafe-jumping and
-   * bunny-hopping gain nothing.
+   * Ground acceleration, as a multiple of the wish speed per second. CS
+   * `sv_accelerate` 5.5: from standstill, full speed in ~0.55 s. Combined
+   * with friction this is what makes counter-strafing stop you in ~0.1 s,
+   * while just releasing the keys takes ~0.4 s.
    */
-  readonly airAcceleration: number;
+  readonly accelerate: number;
 
-  // --- Vertical ---------------------------------------------------------------
-  /** Gravity. 20 m/s² (≈ 2 g): snappy, readable arcs, as competitive shooters use. */
+  // --- Air ------------------------------------------------------------------
+  /** Air acceleration multiplier. CS `sv_airaccelerate` 12. */
+  readonly airAccelerate: number;
+  /**
+   * Cap of the wish speed in the air. CS `sv_air_max_wishspeed` 30 u/s →
+   * 0.762 m/s. Small, so holding a direction barely changes momentum, but
+   * strafing while turning the view can add speed (air strafing).
+   */
+  readonly airMaxWishSpeed: number;
+
+  // --- Vertical -------------------------------------------------------------
+  /** Gravity. CS `sv_gravity` 800 u/s² → 20.32 m/s². */
   readonly gravity: number;
-  /** Jump apex height (feet). 1.0 m: clears 0.9 m obstacles; ~1.2 m ledges need a crouch-jump. */
+  /** Jump apex height (feet). CS: 57 units → 1.448 m (impulse 301.99 u/s = 7.67 m/s). */
   readonly jumpHeight: number;
-  /** A jump pressed up to this long before landing still fires on landing. 0.1 s ≈ 6 ticks. */
+  /**
+   * A jump pressed up to this long before landing still fires on landing.
+   * 0 like CS: the press must happen on the ground. Mobile builds may want a few ticks.
+   */
   readonly jumpBufferSeconds: number;
-  /** Highest ledge climbed by walking (stairs, curbs) and dropped without leaving the ground. 0.35 m. */
+  /** Highest ledge climbed by walking and dropped without leaving the ground. CS `sv_stepsize` 18 u → 0.457 m. */
   readonly stepHeight: number;
-  /** Terminal fall speed. 50 m/s: a safety bound, never reached in normal play. */
-  readonly maxFallSpeed: number;
+  /** Per-axis velocity safety bound. CS `sv_maxvelocity` 3500 u/s → 88.9 m/s. */
+  readonly maxVelocity: number;
+
+  // --- Stamina (our approximation of CS's jump/landing slowdown) -------------
+  /**
+   * CS slows players after jumps and landings so bunny-hopping and jump
+   * spam are not free; the exact CS2 formula is not public. Model: jumping
+   * and landing add fatigue (0..1) that recovers linearly; while fatigued,
+   * ground speed is limited to maxSpeed × (1 − fatigue × staminaSpeedPenalty)
+   * and each jump keeps only (1 − fatigue × staminaSpeedPenalty) of the
+   * horizontal speed. One jump: ~8 % slower for ~0.3 s after landing.
+   * Chained hops lose ~8 % per hop.
+   */
+  readonly jumpStaminaCost: number;
+  readonly landStaminaCost: number;
+  /** Fatigue recovered per second. */
+  readonly staminaRecoveryRate: number;
+  /** Speed lost at full fatigue. */
+  readonly staminaSpeedPenalty: number;
 
   // --- View -----------------------------------------------------------------
-  /** Pitch limit, up and down. 89°: never straight up/down, which would make yaw undefined. */
+  /** Pitch limit, up and down. CS: 89°. */
   readonly maxPitch: number;
 }
 
 export const DEFAULT_PLAYER_MOVEMENT: PlayerMovementConfig = Object.freeze({
-  radius: 0.3,
-  standingHeight: 1.8,
-  crouchingHeight: 1.3,
-  standingEyeHeight: 1.62,
-  crouchingEyeHeight: 1.12,
-  crouchTransitionSeconds: 0.12,
+  radius: 16 * SOURCE_UNIT,
+  standingHeight: 72 * SOURCE_UNIT,
+  crouchingHeight: 54 * SOURCE_UNIT,
+  standingEyeHeight: 64 * SOURCE_UNIT,
+  crouchingEyeHeight: 46 * SOURCE_UNIT,
+  crouchTransitionSeconds: 0.2,
 
-  walkSpeed: 4.8,
-  sprintSpeed: 6.4,
-  crouchSpeed: 1.9,
-  sprintMinForward: 0.5,
+  maxSpeed: 250 * SOURCE_UNIT,
+  walkSpeedScale: 0.52,
+  crouchSpeedScale: 0.34,
 
-  groundAcceleration: 50,
-  groundDeceleration: 70,
-  airAcceleration: 5,
+  friction: 5.2,
+  stopSpeed: 80 * SOURCE_UNIT,
+  accelerate: 5.5,
 
-  gravity: 20,
-  jumpHeight: 1.0,
-  jumpBufferSeconds: 0.1,
-  stepHeight: 0.35,
-  maxFallSpeed: 50,
+  airAccelerate: 12,
+  airMaxWishSpeed: 30 * SOURCE_UNIT,
+
+  gravity: 800 * SOURCE_UNIT,
+  jumpHeight: 57 * SOURCE_UNIT,
+  jumpBufferSeconds: 0,
+  stepHeight: 18 * SOURCE_UNIT,
+  maxVelocity: 3500 * SOURCE_UNIT,
+
+  jumpStaminaCost: 0.2,
+  landStaminaCost: 0.2,
+  staminaRecoveryRate: 0.6,
+  staminaSpeedPenalty: 0.4,
 
   maxPitch: (89 * Math.PI) / 180,
 });

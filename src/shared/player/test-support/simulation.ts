@@ -100,7 +100,7 @@ export function randomIntents(seed: number, ticks: number): Intent[] {
   for (let i = 0; i < ticks; i++) {
     if (next() < 0.04) move = [Math.round(next() * 2 - 1), Math.round(next() * 2 - 1)];
     if (next() < 0.02) move = [next() * 2 - 1, next() * 2 - 1];
-    if (next() < 0.03) held = INPUT_ACTIONS.filter((action) => (action === 'crouch' || action === 'sprint') && next() < 0.4);
+    if (next() < 0.03) held = INPUT_ACTIONS.filter((action) => (action === 'crouch' || action === 'walk') && next() < 0.4);
     if (next() < 0.03) lookRate = (next() * 2 - 1) * 0.08;
     const pressed: InputAction[] = next() < 0.05 ? ['jump'] : [];
     intents.push({ move, look: [lookRate, (next() * 2 - 1) * 0.02], held: [...held, ...pressed], pressed });

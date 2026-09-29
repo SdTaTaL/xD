@@ -38,8 +38,8 @@ export const DEFAULT_KEYBOARD_MOUSE_BINDINGS: KeyboardMouseBindings = {
     Space: 'jump',
     ControlLeft: 'crouch',
     ControlRight: 'crouch',
-    ShiftLeft: 'sprint',
-    ShiftRight: 'sprint',
+    ShiftLeft: 'walk',
+    ShiftRight: 'walk',
     KeyR: 'reload',
   },
   mouseButtons: {

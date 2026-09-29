@@ -14,6 +14,8 @@ const D: Intent = { move: [1, 0] };
 const WD: Intent = { move: [1, 1] };
 const JUMP: Intent = { held: ['jump'], pressed: ['jump'] };
 const CROUCH: Intent = { held: ['crouch'] };
+/** A CS crate: 64 units. */
+const CRATE = 64 * 0.0254;
 
 const with_ = (a: Intent, b: Intent): Intent => ({
   move: b.move ?? a.move,
@@ -32,64 +34,82 @@ function overlapsWorld(world: CollisionWorld, state: PlayerState): boolean {
   return world.overlaps(playerHull(state.position, hullHeight(state.crouched, CONFIG), CONFIG.radius));
 }
 
+const SPEED = CONFIG.maxSpeed;
+const WALK_SPEED = CONFIG.maxSpeed * CONFIG.walkSpeedScale;
+const CROUCH_SPEED = CONFIG.maxSpeed * CONFIG.crouchSpeedScale;
+/** CS rule of thumb: shots are accurate below 34 % of the max speed. */
+const ACCURATE_SPEED = CONFIG.maxSpeed * 0.34;
+
 describe('ground movement (WASD)', () => {
   it.each([
     ['W', W, 0, -1],
     ['S', S, 0, 1],
     ['A', A, -1, 0],
     ['D', D, 1, 0],
-  ] as const)('%s moves at walk speed in the expected direction (yaw 0 faces −Z)', (_, intent, dirX, dirZ) => {
+  ] as const)('%s runs at full speed in the expected direction (yaw 0 faces −Z)', (_, intent, dirX, dirZ) => {
     const sim = settled();
     sim.step(intent, 64);
-    expect(sim.state.velocity.x).toBeCloseTo(dirX * CONFIG.walkSpeed, 12);
-    expect(sim.state.velocity.z).toBeCloseTo(dirZ * CONFIG.walkSpeed, 12);
+    expect(sim.state.velocity.x).toBeCloseTo(dirX * SPEED, 12);
+    expect(sim.state.velocity.z).toBeCloseTo(dirZ * SPEED, 12);
     expect(sim.state.grounded).toBe(true);
+  });
+
+  it('runs by default at CS2 knife speed: 250 u/s = 6.35 m/s', () => {
+    expect(SPEED).toBeCloseTo(6.35, 12);
   });
 
   it('moves relative to the view: W at yaw 90° goes towards +X', () => {
     const sim = settled(floorWorld(), { x: 0, y: 0, z: 0 }, Math.PI / 2);
     sim.step(W, 64);
-    expect(sim.state.velocity.x).toBeCloseTo(CONFIG.walkSpeed, 12);
+    expect(sim.state.velocity.x).toBeCloseTo(SPEED, 12);
     expect(sim.state.velocity.z).toBeCloseTo(0, 12);
   });
 
   it('is exactly as fast diagonally as straight', () => {
     const sim = settled();
     sim.step(WD, 64);
-    expect(horizontalSpeed(sim.state)).toBeCloseTo(CONFIG.walkSpeed, 12);
+    expect(horizontalSpeed(sim.state)).toBeCloseTo(SPEED, 12);
     expect(sim.state.velocity.x).toBeCloseTo(-sim.state.velocity.z, 12);
   });
 
   it('scales with analog input (half stick = half speed)', () => {
     const sim = settled();
     sim.step({ move: [0, 0.5] }, 64);
-    expect(horizontalSpeed(sim.state)).toBeCloseTo((CONFIG.walkSpeed * 64) / 127, 12);
+    expect(horizontalSpeed(sim.state)).toBeCloseTo((SPEED * 64) / 127, 12);
   });
 
-  it('reaches walk speed in 7 ticks (0.11 s) from standstill', () => {
+  it('accelerates like Source: sv_accelerate × speed per second, full speed in 35 ticks (0.55 s)', () => {
     const sim = settled();
-    sim.step(W, 6);
-    expect(horizontalSpeed(sim.state)).toBeLessThan(CONFIG.walkSpeed);
     sim.step(W);
-    expect(horizontalSpeed(sim.state)).toBe(CONFIG.walkSpeed);
+    expect(horizontalSpeed(sim.state)).toBeCloseTo(CONFIG.accelerate * SPEED * TICK, 12);
+    sim.step(W, 33);
+    expect(horizontalSpeed(sim.state)).toBeLessThan(SPEED);
+    sim.step(W);
+    expect(horizontalSpeed(sim.state)).toBe(SPEED);
   });
 
-  it('stops from walk speed in 5 ticks (0.08 s) and less than 0.2 m', () => {
+  it('slides to a stop with friction when the keys are released: accurate after 0.2 s, stopped after 0.41 s', () => {
     const sim = settled();
     sim.step(W, 64);
-    const before = sim.state.position.z;
-    sim.step({}, 4);
+    sim.step({}, 12);
+    expect(horizontalSpeed(sim.state)).toBeGreaterThan(ACCURATE_SPEED);
+    sim.step({});
+    expect(horizontalSpeed(sim.state)).toBeLessThanOrEqual(ACCURATE_SPEED);
+    sim.step({}, 12);
     expect(horizontalSpeed(sim.state)).toBeGreaterThan(0);
     sim.step({});
     expect(horizontalSpeed(sim.state)).toBe(0);
-    expect(Math.abs(sim.state.position.z - before)).toBeLessThan(0.2);
   });
 
-  it('brakes at the deceleration rate when reversing', () => {
+  it('counter-strafing stops far faster than releasing: accurate after 5 ticks (0.08 s)', () => {
     const sim = settled();
     sim.step(D, 64);
+    sim.step(A, 4);
+    expect(sim.state.velocity.x).toBeGreaterThan(ACCURATE_SPEED);
     sim.step(A);
-    expect(sim.state.velocity.x).toBeCloseTo(CONFIG.walkSpeed - CONFIG.groundDeceleration * TICK, 12);
+    expect(sim.state.velocity.x).toBeLessThanOrEqual(ACCURATE_SPEED);
+    sim.step(A, 3);
+    expect(sim.state.velocity.x).toBeLessThanOrEqual(0); // already moving the other way
   });
 
   it('stays put when idle: no drift, no gravity accumulation', () => {
@@ -101,46 +121,47 @@ describe('ground movement (WASD)', () => {
   });
 });
 
-describe('sprint and crouch speeds', () => {
-  const SPRINT: Intent = { held: ['sprint'] };
+describe('walk (Shift) and crouch speeds', () => {
+  const WALK: Intent = { held: ['walk'] };
+  const stanceTarget = (stance: Intent): number => (stance.held?.includes('crouch') ? CROUCH_SPEED : WALK_SPEED);
 
-  it('sprints forward and diagonally forward at sprint speed', () => {
-    for (const move of [W, WD]) {
+  it('walks at 52 % of the max speed (130 u/s), in every direction', () => {
+    for (const move of [W, A, S, D, WD]) {
       const sim = settled();
-      sim.step(with_(move, SPRINT), 64);
-      expect(horizontalSpeed(sim.state)).toBeCloseTo(CONFIG.sprintSpeed, 12);
-      expect(sim.state.sprinting).toBe(true);
+      sim.step(with_(move, WALK), 64);
+      expect(horizontalSpeed(sim.state)).toBeCloseTo(WALK_SPEED, 12);
+      expect(sim.state.walking).toBe(true);
     }
   });
 
-  it('never sprints strafing or backwards', () => {
-    for (const move of [A, D, S]) {
+  it('starts walking and crouching briskly: full stance speed within 0.15 s', () => {
+    for (const stance of [{ held: ['walk'] }, CROUCH] as Intent[]) {
       const sim = settled();
-      sim.step(with_(move, SPRINT), 64);
-      expect(horizontalSpeed(sim.state)).toBeCloseTo(CONFIG.walkSpeed, 12);
-      expect(sim.state.sprinting).toBe(false);
+      sim.step(with_(W, stance), 9);
+      expect(horizontalSpeed(sim.state)).toBeCloseTo(stanceTarget(stance), 12);
     }
   });
 
-  it('crouching overrides sprint', () => {
+  it('crouches at 34 % of the max speed (85 u/s); crouch overrides walk', () => {
     const sim = settled();
-    sim.step(with_(with_(W, SPRINT), CROUCH), 64);
-    expect(horizontalSpeed(sim.state)).toBeCloseTo(CONFIG.crouchSpeed, 12);
-    expect(sim.state.sprinting).toBe(false);
+    sim.step(with_(with_(W, WALK), CROUCH), 64);
+    expect(horizontalSpeed(sim.state)).toBeCloseTo(CROUCH_SPEED, 12);
+    expect(sim.state.walking).toBe(false);
   });
 
-  it('sheds sprint speed at the deceleration rate when sprint is released', () => {
+  it('slows from running to walking through friction, not instantly', () => {
     const sim = settled();
-    sim.step(with_(W, SPRINT), 64);
-    sim.step(W);
-    expect(horizontalSpeed(sim.state)).toBeCloseTo(CONFIG.sprintSpeed - CONFIG.groundDeceleration * TICK, 12);
-    sim.step(W, 3);
-    expect(horizontalSpeed(sim.state)).toBe(CONFIG.walkSpeed);
+    sim.step(W, 64);
+    sim.step(with_(W, WALK));
+    expect(horizontalSpeed(sim.state)).toBeGreaterThan(WALK_SPEED);
+    expect(horizontalSpeed(sim.state)).toBeLessThan(SPEED);
+    sim.step(with_(W, WALK), 64);
+    expect(horizontalSpeed(sim.state)).toBeCloseTo(WALK_SPEED, 12);
   });
 });
 
 describe('jump and gravity', () => {
-  it('jumps to the configured height with a tick-rate independent arc', () => {
+  it('jumps 57 units (1.448 m) with a tick-rate independent arc and lands after ~0.76 s', () => {
     const sim = settled();
     sim.step(JUMP);
     expect(sim.state.grounded).toBe(false);
@@ -155,9 +176,7 @@ describe('jump and gravity', () => {
     }
     expect(apex).toBeGreaterThan(CONFIG.jumpHeight - 0.005);
     expect(apex).toBeLessThanOrEqual(CONFIG.jumpHeight);
-    // Air time 2v/g = 0.632 s ≈ 40.5 ticks.
-    expect(ticks).toBeGreaterThanOrEqual(40);
-    expect(ticks).toBeLessThanOrEqual(41);
+    expect(ticks).toBe(49);
     expect(sim.state.position.y).toBe(0);
     expect(sim.state.velocity.y).toBe(0);
   });
@@ -174,35 +193,31 @@ describe('jump and gravity', () => {
   it('does not auto-jump while the button is held', () => {
     const sim = settled();
     sim.step(JUMP);
-    sim.step({ held: ['jump'] }, 120);
+    sim.step({ held: ['jump'] }, 150);
     const takeoffs = sim.history.filter((s, i) => i > 0 && s.velocity.y > 0 && sim.history[i - 1]!.grounded).length;
     expect(takeoffs).toBe(1); // the initial press only
     expect(sim.state.grounded).toBe(true);
   });
 
-  it('buffers a jump pressed shortly before landing', () => {
+  it('like CS, needs the press on the ground: a press just before landing is lost', () => {
     const sim = settled();
     sim.step(JUMP);
     while (sim.state.position.y > 0.25 || sim.state.velocity.y > 0) sim.step();
-    sim.step(JUMP); // pressed while still airborne
-    let landedTick = -1;
-    for (let i = 0; i < 10 && landedTick < 0; i++) {
-      sim.step();
-      if (sim.state.grounded) landedTick = sim.tick;
-    }
-    expect(landedTick).toBeGreaterThan(0);
-    sim.step();
-    expect(sim.state.velocity.y).toBeGreaterThan(0); // jumped on the first grounded tick
-  });
-
-  it('forgets a jump pressed too early', () => {
-    const sim = settled();
     sim.step(JUMP);
-    sim.step({}, 10);
-    sim.step(JUMP); // ~30 ticks before landing
     sim.settle();
     sim.step();
     expect(sim.state.grounded).toBe(true);
+  });
+
+  it('can buffer early presses when configured (e.g. for touch)', () => {
+    const sim = new Sim(floorWorld(), { x: 0, y: 0, z: 0 }, 0, { ...CONFIG, jumpBufferSeconds: 0.1 });
+    sim.settle();
+    sim.step(JUMP);
+    while (sim.state.position.y > 0.25 || sim.state.velocity.y > 0) sim.step();
+    sim.step(JUMP);
+    while (!sim.state.grounded) sim.step();
+    sim.step();
+    expect(sim.state.velocity.y).toBeGreaterThan(0);
   });
 
   it('stops rising at a ceiling and falls back', () => {
@@ -211,7 +226,7 @@ describe('jump and gravity', () => {
     sim.settle();
     const apex = Math.max(...sim.history.map((s) => s.position.y));
     expect(apex).toBeLessThanOrEqual(2.2 - CONFIG.standingHeight + 1e-9);
-    expect(apex).toBeGreaterThan(0.39);
+    expect(apex).toBeGreaterThan(0.36);
     expect(sim.history.every((s) => !overlapsWorld(sim.context.world, s))).toBe(true);
   });
 
@@ -225,22 +240,63 @@ describe('jump and gravity', () => {
 
   it('keeps horizontal momentum in the air without input', () => {
     const sim = settled();
-    sim.step(with_(W, { held: ['sprint'] }), 64);
+    sim.step(W, 64);
+    sim.step(with_(W, JUMP));
     const speed = horizontalSpeed(sim.state);
-    sim.step(with_(W, { ...JUMP, held: ['jump', 'sprint'] }));
     sim.step({}, 20);
     expect(horizontalSpeed(sim.state)).toBeCloseTo(speed, 12);
   });
 
-  it('never gains speed from air strafing or turning', () => {
+  it('holding a direction in the air does not add speed beyond the 30 u/s air wish cap', () => {
     const sim = settled();
     sim.step(W, 64);
-    const speed = horizontalSpeed(sim.state);
     sim.step(with_(W, JUMP));
-    for (let i = 0; i < 40; i++) {
-      sim.step({ move: [i % 2 ? 1 : -1, 1], look: [0.05, 0] });
-      expect(horizontalSpeed(sim.state)).toBeLessThanOrEqual(speed + 1e-12);
+    const speed = horizontalSpeed(sim.state);
+    sim.step(W, 20);
+    expect(horizontalSpeed(sim.state)).toBeCloseTo(speed, 12);
+  });
+
+  it('air strafing (strafe key + turning the view) gains speed, as in CS', () => {
+    const sim = settled();
+    sim.step(W, 64);
+    sim.step(with_(W, JUMP));
+    const takeoff = horizontalSpeed(sim.state);
+    while (!sim.state.grounded) sim.step({ move: [1, 0], look: [0.03, 0] });
+    expect(horizontalSpeed(sim.state)).toBeGreaterThan(takeoff * 1.1);
+  });
+});
+
+describe('stamina (jump and landing slowdown)', () => {
+  it('a running jump slows you for a moment after landing, then you recover full speed', () => {
+    const sim = settled();
+    sim.step(W, 64);
+    sim.step(with_(W, JUMP));
+    while (!sim.state.grounded) sim.step(W);
+    expect(sim.state.stamina).toBeCloseTo(CONFIG.landStaminaCost, 12);
+    sim.step(W);
+    expect(horizontalSpeed(sim.state)).toBeLessThan(SPEED * 0.95);
+    sim.step(W, 32);
+    expect(horizontalSpeed(sim.state)).toBe(SPEED);
+    expect(sim.state.stamina).toBe(0);
+  });
+
+  it('bunny-hopping without strafing loses speed on every hop', () => {
+    const sim = settled();
+    sim.step(W, 64);
+    const speeds: number[] = [];
+    for (let hop = 0; hop < 5; hop++) {
+      sim.step(with_(W, JUMP));
+      while (!sim.state.grounded) sim.step(W);
+      speeds.push(horizontalSpeed(sim.state));
     }
+    for (let i = 1; i < speeds.length; i++) expect(speeds[i]!).toBeLessThan(speeds[i - 1]! * 0.95);
+  });
+
+  it('does not charge a landing for spawning on the floor or stepping down', () => {
+    const sim = new Sim(floorWorld(aabb(-10, 0, -10, 0, 0.3, 10)), { x: -1, y: 0.3, z: 0 });
+    sim.settle();
+    sim.step(D, 64);
+    expect(sim.history.every((s) => s.stamina === 0)).toBe(true);
   });
 });
 
@@ -253,12 +309,14 @@ describe('walls, corners and gaps', () => {
     expect(sim.state.grounded).toBe(true);
   });
 
-  it('slides along a wall with the wall-parallel part of the input, accelerating at the full rate', () => {
-    const sim = settled(floorWorld(aabb(0.3, 0, -50, 1, 3, 50)));
-    const slideSpeed = CONFIG.walkSpeed * Math.SQRT1_2;
-    sim.step(WD, Math.ceil(slideSpeed / (CONFIG.groundAcceleration * TICK)));
+  it('slides along a wall when pushing diagonally into it', () => {
+    const sim = settled(floorWorld(aabb(CONFIG.radius, 0, -80, 1, 3, 80)));
+    sim.step(WD, 128);
     expect(sim.state.position.x).toBe(0);
-    expect(sim.state.velocity.z).toBeCloseTo(-slideSpeed, 12);
+    expect(sim.state.velocity.x).toBe(0);
+    // Source-style: pushing diagonally into a wall slides at ~75 % of the max speed.
+    expect(-sim.state.velocity.z).toBeGreaterThan(SPEED * 0.7);
+    expect(-sim.state.velocity.z).toBeLessThan(SPEED * 0.8);
   });
 
   it('comes to rest in a concave corner', () => {
@@ -272,24 +330,24 @@ describe('walls, corners and gaps', () => {
   it('slides around an outside corner instead of sticking', () => {
     const sim = settled(floorWorld(aabb(1, 0, -3, 3, 2, -1)));
     sim.step(WD, 128);
-    expect(sim.state.position.x).toBeGreaterThan(3.3);
+    expect(sim.state.position.x).toBeGreaterThan(3 + CONFIG.radius);
   });
 
   it('walks across floor seams without losing speed', () => {
     const world = new CollisionWorld([aabb(-50, -1, -50, 0, 0, 50), aabb(0, -1, -50, 50, 0, 50)]);
     const sim = new Sim(world, { x: -2, y: 0, z: 0 });
     sim.settle();
-    sim.step(D, 20);
     sim.step(D, 40);
-    expect(sim.history.slice(-40).every((s) => s.grounded && horizontalSpeed(s) === CONFIG.walkSpeed)).toBe(true);
+    sim.step(D, 64);
+    expect(sim.history.slice(-64).every((s) => s.grounded && horizontalSpeed(s) === SPEED)).toBe(true);
   });
 
-  it('passes a 0.65 m gap but not a 0.55 m one', () => {
-    const through = settled(floorWorld(aabb(-3, 0, -3, -0.325, 2, -1), aabb(0.325, 0, -3, 3, 2, -1)));
+  it('passes a 0.85 m gap but not a 0.75 m one (the hull is 0.81 m wide)', () => {
+    const through = settled(floorWorld(aabb(-3, 0, -3, -0.425, 2, -1), aabb(0.425, 0, -3, 3, 2, -1)));
     through.step(W, 128);
     expect(through.state.position.z).toBeLessThan(-4);
 
-    const blocked = settled(floorWorld(aabb(-3, 0, -3, -0.275, 2, -1), aabb(0.275, 0, -3, 3, 2, -1)));
+    const blocked = settled(floorWorld(aabb(-3, 0, -3, -0.375, 2, -1), aabb(0.375, 0, -3, 3, 2, -1)));
     blocked.step(W, 128);
     expect(blocked.state.position.z).toBeCloseTo(-1 + CONFIG.radius, 12);
   });
@@ -300,16 +358,17 @@ describe('walls, corners and gaps', () => {
     expect(Math.max(...sim.history.map((s) => s.position.y))).toBeLessThanOrEqual(CONFIG.jumpHeight);
   });
 
-  it('never tunnels through thin walls at extreme speed', () => {
-    const sim = settled(floorWorld(aabb(5, 0, -5, 5.01, 3, 5)));
-    sim.withVelocity({ x: 2000, y: 0, z: 0 });
-    sim.step({});
+  it('never tunnels through thin walls, even near the velocity limit', () => {
+    const sim = new Sim(floorWorld(aabb(5, 0, -5, 5.01, 30, 5)), { x: 0, y: 10, z: 0 });
+    sim.withVelocity({ x: 88, y: 0, z: 0 }); // 1.4 m per tick, airborne (no ground speed limit)
+    sim.step({}, 8);
+    expect(sim.history.every((s) => s.position.x <= 5 - CONFIG.radius + 1e-12)).toBe(true);
     expect(sim.state.position.x).toBeCloseTo(5 - CONFIG.radius, 12);
   });
 });
 
 describe('steps and ledges', () => {
-  it.each([0.2, 0.35])('walks up a %d m step', (height) => {
+  it.each([0.2, 0.45])('walks up a %d m step (step height 18 u = 0.457 m)', (height) => {
     const sim = settled(floorWorld(aabb(1, 0, -2, 30, height, 2)));
     sim.step(D, 64);
     expect(sim.state.position.y).toBeCloseTo(height, 12);
@@ -317,8 +376,8 @@ describe('steps and ledges', () => {
     expect(sim.state.grounded).toBe(true);
   });
 
-  it('is blocked by a 0.5 m obstacle (it needs a jump)', () => {
-    const sim = settled(floorWorld(aabb(1, 0, -2, 30, 0.5, 2)));
+  it('is blocked by a 0.6 m obstacle (it needs a jump)', () => {
+    const sim = settled(floorWorld(aabb(1, 0, -2, 30, 0.6, 2)));
     sim.step(D, 64);
     expect(sim.state.position.x).toBeCloseTo(1 - CONFIG.radius, 12);
     expect(sim.state.position.y).toBe(0);
@@ -354,7 +413,7 @@ describe('crouch', () => {
     sim.step(CROUCH);
     expect(sim.state.crouched).toBe(true);
     expect(sim.state.position.y).toBe(0);
-    sim.step(CROUCH, 6);
+    sim.step(CROUCH, 11);
     expect(sim.state.crouchAmount).toBeLessThan(1);
     sim.step(CROUCH);
     expect(sim.state.crouchAmount).toBe(1);
@@ -364,7 +423,7 @@ describe('crouch', () => {
   it('moves at crouch speed', () => {
     const sim = settled();
     sim.step(with_(W, CROUCH), 64);
-    expect(horizontalSpeed(sim.state)).toBeCloseTo(CONFIG.crouchSpeed, 12);
+    expect(horizontalSpeed(sim.state)).toBeCloseTo(CROUCH_SPEED, 12);
   });
 
   it('enters a 1.5 m tunnel only crouched, cannot stand inside and stands again after it', () => {
@@ -403,12 +462,12 @@ describe('crouch', () => {
   });
 
   it('gives the crouch-jump when jump and crouch are pressed on the same tick', () => {
-    const world = floorWorld(aabb(1, 0, -2, 3, 1.2, 2));
-    const sim = settled(world, { x: 0.6, y: 0, z: 0 });
+    const world = floorWorld(aabb(1, 0, -2, 3, CRATE, 2));
+    const sim = settled(world, { x: 0.5, y: 0, z: 0 });
     sim.step(with_(with_(D, JUMP), CROUCH));
     expect(sim.state.position.y).toBeGreaterThan(CONFIG.standingHeight - CONFIG.crouchingHeight);
     sim.step(with_(D, CROUCH), 80);
-    expect(sim.state.position.y).toBeCloseTo(1.2, 12);
+    expect(sim.state.position.y).toBeCloseTo(CRATE, 12);
   });
 
   it('jumps with the crouched hull (no bonus) when already crouched on the ground', () => {
@@ -419,17 +478,17 @@ describe('crouch', () => {
     expect(Math.max(...sim.history.map((s) => s.position.y))).toBeLessThanOrEqual(CONFIG.jumpHeight);
   });
 
-  it('reaches a 1.2 m ledge with a crouch-jump but not with a plain jump', () => {
-    const world = floorWorld(aabb(1, 0, -2, 3, 1.2, 2));
-    const plain = settled(world, { x: 0.6, y: 0, z: 0 });
+  it('reaches a 64-unit crate (1.63 m) with a crouch-jump but not with a plain jump', () => {
+    const world = floorWorld(aabb(1, 0, -2, 3, CRATE, 2));
+    const plain = settled(world, { x: 0.5, y: 0, z: 0 });
     plain.step(with_(D, JUMP));
     plain.step(D, 80);
     expect(plain.state.position.y).toBe(0);
 
-    const crouchJump = settled(world, { x: 0.6, y: 0, z: 0 });
+    const crouchJump = settled(world, { x: 0.5, y: 0, z: 0 });
     crouchJump.step(with_(D, JUMP));
     crouchJump.step(with_(D, CROUCH), 80);
-    expect(crouchJump.state.position.y).toBeCloseTo(1.2, 12);
+    expect(crouchJump.state.position.y).toBeCloseTo(CRATE, 12);
     expect(crouchJump.state.grounded).toBe(true);
   });
 });
@@ -478,7 +537,8 @@ describe('determinism and robustness', () => {
           if (!values.every(Number.isFinite)) throw new Error('non-finite state');
           if (overlapsWorld(world, state)) throw new Error(`inside geometry at ${JSON.stringify(state.position)}`);
           if (state.position.y < -1e-9) throw new Error(`below the floor at ${JSON.stringify(state.position)}`);
-          if (horizontalSpeed(state) > CONFIG.sprintSpeed + 1e-9) throw new Error(`too fast: ${horizontalSpeed(state)}`);
+          // Air strafing can exceed the run speed, but random input never gets anywhere near runaway speeds.
+          if (horizontalSpeed(state) > 2 * SPEED) throw new Error(`too fast: ${horizontalSpeed(state)}`);
         }
       }
     }

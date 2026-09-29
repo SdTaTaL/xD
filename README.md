@@ -41,19 +41,28 @@ Clicar na vista do jogo captura o rato (Pointer Lock). `Esc` liberta-o.
 Enquanto não há captura, nenhum input chega ao jogo. O jogador aparece na
 entrada da área de teste de movimento, a leste da arena.
 
+O movimento segue o modelo do CS2 (valores em `PlayerMovementConfig.ts`):
+corre por defeito a 250 u/s (6,35 m/s), `Shift` anda em silêncio a 52 % e
+agachado anda a 34 %. Fricção e aceleração do Source: largar as teclas
+demora ~0,4 s a parar, carregar na direção oposta (counter-strafe) trava em
+~0,1 s. No ar, virar a vista enquanto se faz strafe ganha velocidade (air
+strafing). Saltar e aterrar cansa: velocidade reduzida durante um instante,
+o que torna o bunny hop pouco eficaz.
+
 | Entrada               | Ação                       |
 | --------------------- | -------------------------- |
 | `W` `A` `S` `D`       | mover (frente/esq./trás/dir.) |
 | Rato                  | olhar                      |
 | `Espaço`              | saltar                     |
 | `Ctrl`                | agachar                    |
-| `Shift`               | sprint (só para a frente)  |
+| `Shift`               | andar (silencioso)         |
 | `R`                   | reload (sem efeito ainda)  |
 | Botão esquerdo        | fire (sem efeito ainda)    |
 | Botão direito         | aim (sem efeito ainda)     |
 
-Saltar e agachar no ar (ou premir os dois ao mesmo tempo) é um crouch-jump:
-chega a plataformas de 1,2 m.
+Um salto normal sobe 57 u (1,45 m). Saltar e agachar no ar (ou premir os
+dois ao mesmo tempo) é um crouch-jump: chega a caixas de 64 u (1,63 m), como
+no CS.
 
 ## Estrutura
 
@@ -91,8 +100,8 @@ src/
 
 ## Convenções
 
-- Unidades em metros. Sistema destro, Y para cima, −Z para a frente (convenção Three.js).
-- FOV configurado como FOV horizontal a 16:9 (103°). O FOV vertical é constante ("Hor+").
+- Unidades em metros (valores do CS convertidos: 1 unidade Source = 0,0254 m). Sistema destro, Y para cima, −Z para a frente (convenção Three.js).
+- FOV configurado como FOV horizontal a 16:9 (106,26°, o do CS2). O FOV vertical é constante ("Hor+").
 - A simulação corre a 64 ticks/s, independente do refresh rate do ecrã.
 - `src/shared` não importa `src/client`, Three.js nem APIs do browser.
 - Imports entre camadas usam `@shared/...` e `@client/...`. Dentro da mesma camada usam caminhos relativos.

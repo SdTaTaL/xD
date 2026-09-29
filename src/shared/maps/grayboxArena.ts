@@ -101,6 +101,9 @@ const LAB_MAX_X = 49;
 const LAB_HALF_DEPTH = 12;
 const LAB_WALL_HEIGHT = 4;
 
+/** A Counter-Strike crate: 64 units. */
+const CRATE_HEIGHT = 64 * 0.0254;
+
 /** Stairs: six 0.25 m risers with 0.6 m treads, up to a 1.5 m platform. */
 const STAIR_START_X = 38.4;
 const STAIR_RISE = 0.25;
@@ -113,16 +116,18 @@ const MOVEMENT_LAB: readonly MapSolid[] = [
   box('wall', LAB_MIN_X, 0, LAB_HALF_DEPTH, LAB_MAX_X + 1, LAB_WALL_HEIGHT, LAB_HALF_DEPTH + 1),
   box('wall', LAB_MAX_X, 0, -LAB_HALF_DEPTH, LAB_MAX_X + 1, LAB_WALL_HEIGHT, LAB_HALF_DEPTH),
 
-  // Obstacle row (north): 0.2 and 0.35 m are climbed by walking (step height),
-  // 0.5 and 0.9 m need a jump, 1.2 m needs a crouch-jump, 1.6 m cannot be reached from the floor.
+  // Obstacle row (north), calibrated for CS2 movement: 0.2 and 0.45 m are
+  // climbed by walking (step 18 u = 0.457 m), 0.6 and 1.2 m need a jump
+  // (57 u = 1.448 m), a 64-unit crate (1.63 m) needs a crouch-jump, 2.1 m
+  // cannot be reached from the floor.
   box('cover', 28, 0, -10, 30, 0.2, -7),
-  box('cover', 31.5, 0, -10, 33.5, 0.35, -7),
-  box('cover', 35, 0, -10, 37, 0.5, -7),
-  box('cover', 38.5, 0, -10, 40.5, 0.9, -7),
-  box('cover', 42, 0, -10, 44, 1.2, -7),
-  box('cover', 45.5, 0, -10, 47.5, 1.6, -7),
+  box('cover', 31.5, 0, -10, 33.5, 0.45, -7),
+  box('cover', 35, 0, -10, 37, 0.6, -7),
+  box('cover', 38.5, 0, -10, 40.5, 1.2, -7),
+  box('cover', 42, 0, -10, 44, CRATE_HEIGHT, -7),
+  box('cover', 45.5, 0, -10, 47.5, 2.1, -7),
 
-  // Canopy with its underside at 2.2 m: a standing player fits, a jump bumps the head.
+  // Canopy with its underside at 2.2 m: a standing player (1.83 m) fits, a jump bumps the head.
   box('wall', 30, 2.2, -4.5, 33, 2.4, -2.5),
 
   // Stairs up to a 1.5 m platform against the east wall (drop off its sides to test landings).
@@ -135,16 +140,16 @@ const MOVEMENT_LAB: readonly MapSolid[] = [
   box('wall', 28, 0, 4.6, 35, 3, 5),
   box('wall', 28, 0, 6.2, 35, 3, 6.6),
 
-  // Tunnel with a 1.5 m ceiling: crouch to enter, standing up inside is refused.
+  // Tunnel with a 1.5 m ceiling: crouched (1.37 m) to enter, standing up inside is refused.
   box('wall', 38, 0, 4.6, 44, 1.8, 5),
   box('wall', 38, 0, 7, 44, 1.8, 7.4),
   box('wall', 38, 1.5, 4.6, 44, 1.8, 7.4),
 
-  // Gaps: 0.65 m lets the 0.6 m hull through, 0.55 m does not.
-  box('cover', 27, 0, 8.5, 29.35, 2, 10.5),
-  box('cover', 30, 0, 8.5, 32, 2, 10.5),
-  box('cover', 33, 0, 8.5, 35.2, 2, 10.5),
-  box('cover', 35.75, 0, 8.5, 38, 2, 10.5),
+  // Gaps: 0.85 m lets the 0.81 m hull through, 0.75 m does not.
+  box('cover', 27, 0, 8.5, 29.2, 2, 10.5),
+  box('cover', 30.05, 0, 8.5, 32, 2, 10.5),
+  box('cover', 33, 0, 8.5, 35.1, 2, 10.5),
+  box('cover', 35.85, 0, 8.5, 38, 2, 10.5),
 ];
 
 export const GRAYBOX_ARENA: MapDefinition = {

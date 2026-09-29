@@ -63,7 +63,7 @@ describe('KeyboardMouseAdapter actions', () => {
   it.each([
     ['Space', 'jump'],
     ['ControlLeft', 'crouch'],
-    ['ShiftLeft', 'sprint'],
+    ['ShiftLeft', 'walk'],
     ['KeyR', 'reload'],
   ] as const)('%s holds %s', (code, action) => {
     const { adapter, sample } = setup();

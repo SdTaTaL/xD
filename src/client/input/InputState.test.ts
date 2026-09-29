@@ -140,7 +140,7 @@ describe('InputState release', () => {
     const state = new InputState();
     const keyboard = state.connect('kbm');
     const touch = state.connect('touch');
-    keyboard.press('sprint');
+    keyboard.press('walk');
     keyboard.setMove(0, 1);
     touch.press('aim');
     touch.setLookRate(1, 0);

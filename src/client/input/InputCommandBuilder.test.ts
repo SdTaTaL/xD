@@ -10,10 +10,10 @@ function sample(overrides: Partial<InputSample> = {}): InputSample {
 
 describe('InputCommandBuilder', () => {
   it('builds an immutable command for the given tick', () => {
-    const command = new InputCommandBuilder().build(42, sample({ moveY: 1, held: actionBit('sprint'), pressed: actionBit('jump') }));
+    const command = new InputCommandBuilder().build(42, sample({ moveY: 1, held: actionBit('walk'), pressed: actionBit('jump') }));
     expect(command.tick).toBe(42);
     expect(command.moveY).toBe(1);
-    expect(command.held).toBe(actionBit('sprint'));
+    expect(command.held).toBe(actionBit('walk'));
     expect(command.pressed).toBe(actionBit('jump'));
     expect(Object.isFrozen(command)).toBe(true);
   });

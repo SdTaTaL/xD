@@ -26,8 +26,10 @@ export interface PlayerState {
   readonly crouched: boolean;
   /** View blend between standing (0) and crouched (1) eye height. */
   readonly crouchAmount: number;
-  /** Moving at sprint speed this tick. */
-  readonly sprinting: boolean;
+  /** Walking (the silent, slower gait) this tick. */
+  readonly walking: boolean;
+  /** Jump/landing fatigue, 0 (fresh) to 1; slows the player while it recovers. */
+  readonly stamina: number;
   /** Remaining ticks in which a buffered jump press still triggers a jump. */
   readonly jumpBufferTicks: number;
 }
@@ -46,7 +48,8 @@ export function createPlayerState(spawn: SpawnPose): PlayerState {
     grounded: false,
     crouched: false,
     crouchAmount: 0,
-    sprinting: false,
+    walking: false,
+    stamina: 0,
     jumpBufferTicks: 0,
   });
 }

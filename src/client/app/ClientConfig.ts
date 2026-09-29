@@ -43,7 +43,8 @@ const DEFAULT_CONFIG: ClientConfig = {
     shadows: true,
   },
   camera: {
-    horizontalFovDegrees: 103,
+    // CS2's default: 90° horizontal at 4:3, i.e. 106.26° at 16:9 with Hor+ scaling.
+    horizontalFovDegrees: 106.26,
     near: 0.05,
     far: 500,
   },

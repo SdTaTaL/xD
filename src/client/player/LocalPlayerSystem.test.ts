@@ -75,7 +75,7 @@ describe('LocalPlayerSystem', () => {
     ]);
     const reference = run(60, 2.5, keys, 0).state;
     for (const fps of [30, 144, 240]) expect(run(fps, 2.5, keys, 0).state).toEqual(reference);
-    expect(reference.position.z).toBeLessThan(-5);
+    expect(reference.position.z).toBeLessThan(-3); // it did move
   });
 
   it('loses and duplicates no mouse motion at any frame rate', () => {
@@ -101,7 +101,7 @@ describe('first-person view smoothness (no jitter)', () => {
       const tick = { tick: 0, deltaSeconds: SIMULATION_TICK_SECONDS };
       kbm.keyDown('KeyD');
       const xs: number[] = [];
-      for (let frame = 0; frame < fps; frame++) {
+      for (let frame = 0; frame < fps * 1.5; frame++) {
         input.beginFrame();
         timestep.advance(1 / fps, (index, step) => {
           tick.tick = index;
@@ -112,9 +112,10 @@ describe('first-person view smoothness (no jitter)', () => {
         view.update({ index: frame, deltaSeconds: 1 / fps, elapsedSeconds: frame / fps, alpha: timestep.alpha });
         xs.push(camera.position.x);
       }
-      // After the 0.11 s acceleration, every frame moves by the same distance.
-      const steps = xs.slice(fps / 4).map((x, i, all) => (i === 0 ? null : x - all[i - 1]!)).slice(1) as number[];
-      for (const step of steps) expect(step).toBeCloseTo(CONFIG.walkSpeed / fps, 9);
+      // After the ~0.55 s acceleration, every frame moves by the same distance.
+      const steps = xs.slice(fps * 0.75).map((x, i, all) => (i === 0 ? null : x - all[i - 1]!)).slice(1) as number[];
+      expect(steps.length).toBeGreaterThan(fps / 2);
+      for (const step of steps) expect(step).toBeCloseTo(CONFIG.maxSpeed / fps, 9);
     }
   });
 

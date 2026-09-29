@@ -97,7 +97,7 @@ export function neutralCommand(tick: number): InputCommand {
   return createInputCommand({ tick, moveX: 0, moveY: 0, lookX: 0, lookY: 0, held: NO_ACTIONS, pressed: NO_ACTIONS });
 }
 
-/** True while the action is held (continuous input: sprint, crouch, automatic fire). */
+/** True while the action is held (continuous input: walk, crouch, automatic fire). */
 export function isActionHeld(command: InputCommand, action: InputAction): boolean {
   return hasAction(command.held, action);
 }

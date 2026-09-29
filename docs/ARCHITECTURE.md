@@ -89,7 +89,8 @@ comando do tick já exista quando é lido.
   agrupadas e aplicadas no início do frame seguinte. O pixel ratio tem um
   limite configurável (2 por defeito).
 - **Câmara:** FOV vertical fixo derivado de um FOV horizontal a 16:9 ("Hor+"):
-  ecrãs mais largos veem mais para os lados e nunca menos na vertical.
+  ecrãs mais largos veem mais para os lados e nunca menos na vertical. O
+  valor é o do CS2: 106,26° a 16:9 (90° a 4:3).
 - **Pipelines** são compiladas no arranque (`compileAsync`), para evitar
   engasgos de compilação de shaders nos primeiros frames.
 
@@ -119,7 +120,7 @@ Dispositivo ─► Adapter ─► InputState ─► InputCommandBuilder ─► I
 | `tick` | tick de simulação a que se aplica | inteiro ≥ 0 |
 | `moveX`, `moveY` | intenção de movimento; +X direita, +Y frente; vetor no disco unitário | múltiplos de 1/127 (int8) |
 | `lookX`, `lookY` | rotação neste tick, em radianos; +X direita, +Y cima | múltiplos de 2⁻¹⁶ rad |
-| `held` | ações seguras no momento da amostra (contínuo: sprint, crouch, fogo automático) | bitmask |
+| `held` | ações seguras no momento da amostra (contínuo: walk, crouch, fogo automático) | bitmask |
 | `pressed` | ações que desceram neste tick, incluindo toques mais curtos que um tick (one-shot: jump, reload) | bitmask |
 
 - A ordem de `INPUT_ACTIONS` define o bit de cada ação e faz parte do formato
@@ -192,49 +193,80 @@ resultados de `Math.sin`/`Math.cos` podem diferir entre motores JavaScript.
 
 | Ficheiro (`shared/player/`) | Responsabilidade |
 | --- | --- |
-| `PlayerState.ts` | estado completo e serializável (posição dos pés, velocidade, yaw/pitch, grounded, crouched, crouchAmount, sprinting, jump buffer); hull e altura dos olhos |
-| `PlayerMovementConfig.ts` | todos os valores de tuning, documentados um a um |
+| `PlayerState.ts` | estado completo e serializável (posição dos pés, velocidade, yaw/pitch, grounded, crouched, crouchAmount, walking, stamina, jump buffer); hull e altura dos olhos |
+| `PlayerMovementConfig.ts` | todos os valores de tuning, com a cvar do CS de onde vêm |
 | `look.ts` | yaw livre (com wrap) e pitch limitado |
-| `horizontal.ts` | velocidade desejada (vetor limitado ao disco unitário), aceleração no chão e controlo no ar |
+| `horizontal.ts` | velocidade desejada (vetor limitado ao disco unitário), fricção e aceleração do Source no chão, aceleração no ar |
 | `vertical.ts` | gravidade (cinemática exata) e jump buffer |
+| `stamina.ts` | cansaço de saltos e aterragens (anti bunny-hop) |
 | `crouch.ts` | agachar e levantar, com verificação de espaço |
 | `kinematics.ts` | collide-and-slide por eixo, subir degraus e sonda de chão |
 | `PlayerController.ts` | ordem das fases dentro de um tick |
 
-### Valores iniciais (`DEFAULT_PLAYER_MOVEMENT`)
+### Valores (`DEFAULT_PLAYER_MOVEMENT`): modelo do CS2
 
-| Parâmetro | Valor | Consequência a 64 Hz |
-| --- | --- | --- |
-| hull | 0,6 × 1,8 m (agachado 1,3 m) | passa em aberturas de 0,65 m e em túneis de 1,5 m agachado |
-| olhos | 1,62 m / 1,12 m (0,18 m abaixo do topo) | agachar no ar não mexe a vista |
-| walk / sprint / crouch | 4,8 / 6,4 / 1,9 m/s | 10 s para atravessar a arena; sprint +33 %; crouch 40 % |
-| sprint | só com ≥ 0,5 de componente para a frente (≤ 60°) | W e W+A/D fazem sprint; strafe puro e recuar não fazem |
-| aceleração no chão | 50 m/s² | 0 → 4,8 m/s em 7 ticks (0,11 s) |
-| desaceleração no chão | 70 m/s² | 4,8 → 0 em 5 ticks (0,08 s, < 0,2 m) |
-| controlo no ar | 5 m/s² | ~3 m/s de correção por salto; nunca ganha velocidade |
-| gravidade / salto | 20 m/s², 1,0 m | impulso √(2gh) = 6,32 m/s; 0,64 s no ar |
-| jump buffer | 0,1 s (6 ticks) | um salto premido pouco antes de aterrar não se perde |
-| degrau | 0,35 m | escadas e lancis sem saltar; 0,5 m obriga a saltar |
-| pitch | ±89° | |
+O movimento reproduz o do Counter-Strike 2, a referência que o Standoff 2 e
+o Critical Ops também seguem. Os valores são as cvars e as dimensões do CS2,
+convertidos para metros (1 unidade Source = 1 polegada = 0,0254 m).
 
-Estes são valores de partida para afinar, não definitivos. Os testes
-verificam as consequências (por exemplo, tempo até à velocidade máxima)
-calculadas a partir da configuração.
+| Parâmetro | CS2 | Metros | Consequência a 64 Hz (medida nos testes) |
+| --- | --- | --- | --- |
+| hull | 32 × 72 u (agachado 54 u) | 0,81 × 1,83 m (1,37 m) | passa em aberturas de 0,85 m, não em 0,75 m; túnel de 1,5 m só agachado |
+| olhos | 64 / 46 u (8 u abaixo do topo) | 1,626 / 1,168 m | agachar no ar não mexe a vista |
+| velocidade máxima | 250 u/s (faca) | 6,35 m/s | as armas vão baixá-la (AK-47: 215 u/s) |
+| walk (`Shift`) / crouch | × 0,52 / × 0,34 | 3,30 / 2,16 m/s | atingidas em 9 / 16 ticks |
+| `sv_accelerate` | 5,5 | | 0 → 6,35 m/s em 35 ticks (0,55 s) |
+| `sv_friction` / `sv_stopspeed` | 5,2 / 80 u/s | — / 2,03 m/s | largar as teclas: ≤ 34 % em 13 ticks, parado em 26 (0,41 s, 0,94 m) |
+| counter-strafe | (fricção + aceleração) | | ≤ 34 % em 5 ticks (0,08 s), inverte ao 8.º (0,29 m) |
+| `sv_airaccelerate` / `sv_air_max_wishspeed` | 12 / 30 u/s | — / 0,76 m/s | air strafing: +20 % num salto a rodar 160°/s |
+| `sv_gravity` / altura do salto | 800 u/s² / 57 u | 20,32 m/s² / 1,448 m | impulso √(2gh) = 7,67 m/s; 49 ticks (0,77 s) no ar |
+| `sv_stepsize` | 18 u | 0,457 m | 0,45 m sobe-se a andar, 0,6 m obriga a saltar |
+| `sv_maxvelocity` | 3500 u/s | 88,9 m/s | limite por eixo, salvaguarda |
+| jump buffer | 0 (como no CS) | | o press tem de acontecer no chão; configurável para mobile |
+| stamina | aproximação nossa | | ver abaixo |
+| pitch | ±89° | | |
+
+Os testes verificam estas consequências a partir da configuração. Afinar
+sempre em `PlayerMovementConfig.ts`, nunca no controller.
 
 ### Movimento horizontal
 
 - A direção do input é limitada ao disco unitário: W+D é normalizado e não é
   mais rápido que W. Um stick analógico a meio pede metade da velocidade.
-- **No chão**, a velocidade aproxima-se da velocidade desejada em linha reta,
-  a ritmo constante. Acelera a 50 m/s². Parar, travar contra o movimento ou
-  perder velocidade acima do limite é a 70 m/s². Como a aproximação é em linha
-  reta, a velocidade nunca ultrapassa max(atual, limite da postura).
-- **No ar**, sem input, o momento mantém-se. Com input, a velocidade é
-  orientada para a direção desejada à velocidade atual (ou ao limite, se for
-  maior). Dá para corrigir e travar, mas não há strafe-jumping nem bunny-hop
-  que acrescentem velocidade.
-- **Contra uma parede**, conta só a parte do input paralela à parede, que
-  acelera ao ritmo normal. Não se perde aceleração no eixo bloqueado.
+- Corre-se por defeito. `Shift` (walk) anda a 52 % e em silêncio (para o
+  futuro sistema de som); agachado anda a 34 %. Walk não tem efeito agachado.
+- **No chão (Source):** primeiro a fricção tira max(velocidade, stopspeed) ×
+  5,2 × dt: proporcional a correr (abranda suave), constante perto de zero
+  (para em tempo finito). Depois a aceleração soma, na direção desejada, até
+  5,5 × 6,35 m/s × dt, mas só até a componente nessa direção chegar à
+  velocidade desejada. A aceleração nunca tira velocidade.
+- **Counter-strafe:** carregar na direção oposta soma a aceleração à fricção,
+  por isso trava ~2,5× mais depressa do que largar as teclas. É o que dá o
+  "parar para disparar" do CS.
+- **Walk e crouch** aceleram com a base da velocidade máxima, não da
+  velocidade da postura. Com a fórmula pura, a fricção quase anula a
+  aceleração agachado e começar a andar demoraria ~1,6 s; no CS arranca-se
+  tão depressa como a correr.
+- **No ar (Source):** sem fricção; a aceleração (× 12) só leva a componente na
+  direção desejada até 0,76 m/s. Segurar uma tecla quase não muda o momento,
+  mas fazer strafe enquanto se roda a vista mantém a direção desejada quase
+  perpendicular à velocidade e ganha velocidade (air strafing).
+- **Contra uma parede**, o eixo bloqueado perde a velocidade e fica só a
+  componente paralela (deslizar a 70–80 % da velocidade num ângulo de 45°).
+
+### Stamina (anti bunny-hop)
+
+O CS abranda o jogador depois de saltar e de aterrar, para que o bunny hop e
+o spam de saltos não sejam gratuitos. A fórmula exata do CS2 não é pública,
+por isso isto é uma aproximação nossa:
+- saltar e aterrar (a cair a mais de 1 m/s) somam 0,2 de cansaço (0..1), que
+  recupera a 0,6/s;
+- com cansaço, a velocidade no chão fica limitada a 6,35 × (1 − 0,4 ×
+  cansaço), e cada salto mantém só essa fração da velocidade horizontal;
+- um salto isolado: aterra-se a 92 % da velocidade e recupera-se em 0,34 s;
+- saltos encadeados: cada hop perde ~7,6 % (6,35 → 5,87 → 5,42 → 5,01 m/s…).
+
+Spawns e degraus não contam como aterragens.
 
 ### Colisão (`shared/physics/`)
 
@@ -250,7 +282,7 @@ exata sem motor de física:
   seja intersetar. Por isso, estar pousado no chão, deslizar por uma parede ou
   passar por juntas entre caixas nunca prende.
 - **Degraus:** se o movimento no chão ficar bloqueado, repete-se levantado até
-  0,35 m e desce-se depois. Só é aceite se chegar mais longe. Paredes mais
+  0,457 m (18 u) e desce-se depois. Só é aceite se chegar mais longe. Paredes mais
   altas que um degrau continuam a bloquear, por isso não se trepam paredes.
 - **Salvaguarda:** no início de cada tick, se o hull estiver dentro de
   geometria (spawn, teleporte, futura correção de rede), é empurrado para fora
@@ -262,7 +294,7 @@ exata sem motor de física:
 
 - Depois de mover, faz-se uma sonda de chão para baixo. Se estiver a subir,
   nunca está grounded.
-- A andar (grounded no tick anterior e sem saltar), a sonda chega aos 0,35 m:
+- A andar (grounded no tick anterior e sem saltar), a sonda chega aos 0,457 m:
   descer degraus e lancis mantém o contacto com o chão. Uma queda maior
   deixa-o no ar.
 - No ar, a sonda só chega a 1 cm. O jogador aterra exatamente na superfície
@@ -272,12 +304,13 @@ exata sem motor de física:
 
 ### Crouch
 
-- O hull muda de imediato; a altura dos olhos muda em 0,12 s. A velocidade
-  máxima passa a 1,9 m/s.
+- O hull muda de imediato; a altura dos olhos muda em 0,2 s. A velocidade
+  máxima passa a 34 % (2,16 m/s).
 - **No chão:** os pés ficam no sítio e o topo desce.
 - **No ar (ou no tick do salto):** a cabeça fica no sítio e as pernas
-  encolhem 0,5 m. É o crouch-jump, que chega a 1,2 m. Como os olhos estão a
-  0,18 m do topo nas duas posturas, a vista não se mexe.
+  encolhem 18 u (0,457 m). É o crouch-jump, que chega a caixas de 64 u
+  (1,63 m); o salto normal não chega. Como os olhos estão 8 u abaixo do topo
+  nas duas posturas, a vista não se mexe.
 - **Levantar** exige espaço livre para o hull de pé. No ar tenta-se primeiro
   estender as pernas para baixo e depois subir a cabeça. Sem espaço (túnel de
   1,5 m), o jogador fica agachado e levanta-se sozinho quando houver espaço.
@@ -287,8 +320,10 @@ exata sem motor de física:
 
 - Salta-se só se estava grounded no início do tick e houve um *press* (não
   basta ter a tecla segura). Não há duplo salto nem auto-jump.
-- Há um jump buffer de 6 ticks: um press pouco antes de aterrar salta logo no
-  primeiro tick no chão.
+- Como no CS, não há jump buffer: um press no ar perde-se. O buffer existe
+  (`jumpBufferSeconds`) para quem o quiser, por exemplo em mobile.
+- O tick do salto segue as regras do ar (sem fricção), como no Source. O
+  cansaço corta a velocidade horizontal (ver Stamina).
 - A gravidade usa cinemática exata (Δy = v·dt − ½·g·dt²), por isso o apex é o
   configurado a qualquer tick rate.
 - Um teto corta a subida (velocidade vertical 0) e o jogador cai.
@@ -310,10 +345,11 @@ exata sem motor de física:
 
 A leste da arena, atrás de uma porta, há um laboratório de movimento só para
 desenvolvimento:
-- obstáculos de 0,2 / 0,35 / 0,5 / 0,9 / 1,2 / 1,6 m;
+- obstáculos de 0,2 / 0,45 (sobem-se a andar) / 0,6 / 1,2 (salto) / 1,63
+  (64 u, crouch-jump) / 2,1 m (inacessível);
 - escadas até uma plataforma de 1,5 m;
 - corredor de 1,2 m;
-- aberturas de 0,65 m e 0,55 m;
+- aberturas de 0,85 m (passa) e 0,75 m (não passa);
 - túnel com teto a 1,5 m e uma pala a 2,2 m.
 
 A porta tem 2,4 m de altura. `?spawn=x,y,z,yaw` coloca o jogador em qualquer
