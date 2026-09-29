@@ -1,11 +1,11 @@
 import { Color, InstancedMesh, MeshStandardNodeMaterial, Object3D, PlaneGeometry, Vector3 } from 'three/webgpu';
 import { color, float, length, smoothstep, uv } from 'three/tsl';
-import type { Shot } from '@shared/weapons/WeaponController';
+import type { ShotOutcome } from '@shared/combat/targets';
 import type { GameSystem } from '../core/GameSystem';
 
 export interface ImpactMarksOptions {
-  /** Shot events to mark (see LocalPlayerSystem.onShot). */
-  readonly source: { onShot(listener: (shot: Shot) => void): () => void };
+  /** Resolved shots (see TrainingRange.onShotResolved): only bullets that reached the map leave a mark. */
+  readonly source: { onShotResolved(listener: (outcome: ShotOutcome) => void): () => void };
   /** Marks kept; the oldest is reused when full. */
   readonly capacity?: number;
 }
@@ -19,9 +19,10 @@ const GOLDEN_ANGLE = 2.399963229728653;
 const FACE_NORMAL = new Vector3(0, 0, 1);
 
 /**
- * Bullet holes where shots hit the map: one instanced quad per hit, oriented
- * by the surface normal, in a fixed ring buffer (a single draw call however
- * many marks there are). Presentation only.
+ * Bullet holes where shots hit the map (not where a target stopped the
+ * bullet first): one instanced quad per hit, oriented by the surface normal,
+ * in a fixed ring buffer (a single draw call however many marks there are).
+ * Presentation only.
  */
 export class ImpactMarks implements GameSystem {
   readonly name = 'impact-marks';
@@ -51,8 +52,8 @@ export class ImpactMarks implements GameSystem {
     this.mesh.receiveShadow = true;
     this.mesh.frustumCulled = false;
 
-    this.unsubscribe = options.source.onShot((shot) => {
-      if (shot.hit) this.add(shot.hit.point, shot.hit.normal, shot.tick);
+    this.unsubscribe = options.source.onShotResolved(({ shot, target }) => {
+      if (shot.hit && !target) this.add(shot.hit.point, shot.hit.normal, shot.tick);
     });
   }
 

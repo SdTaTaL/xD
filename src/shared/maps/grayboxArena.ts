@@ -4,7 +4,8 @@ import type { MapDefinition, MapSolid, SolidKind } from './MapDefinition';
  * Graybox arena: a 48 m × 48 m symmetric arena plus a movement lab.
  *
  * The arena itself is point-symmetric around the origin (a 180° rotation maps
- * one half onto the other) so both sides are equivalent. East of it, through
+ * one half onto the other) so both sides are equivalent, apart from four
+ * training dummies (a shooting range facing the east door). East of it, through
  * a door, is the movement lab: a development-only annex with calibrated
  * obstacles for testing the player controller. It breaks the symmetry on
  * purpose and will move to a dedicated test map once one exists.
@@ -157,10 +158,21 @@ export const GRAYBOX_ARENA: MapDefinition = {
   name: 'Graybox Arena',
   solids: [...ARENA, ...MOVEMENT_LAB],
   spawnPoints: [
+    // Shooting range: inside the arena by the lab door, facing the targets (−X).
+    { position: { x: 22, y: 0, z: 0 }, yaw: -Math.PI / 2 },
     // Movement lab entrance, facing into the lab (+X).
     { position: { x: 26.5, y: 0, z: 0 }, yaw: Math.PI / 2 },
     // Arena bases, facing the center.
     { position: { x: 0, y: 0, z: 21 }, yaw: 0 },
     { position: { x: 0, y: 0, z: -21 }, yaw: -Math.PI },
+  ],
+  // Training dummies at ~5, 10, 20 and 30 m from the range spawn, each facing
+  // it, spread sideways so none hides another and a wall catches the misses.
+  // Kevlar and helmet, as in a competitive round.
+  targets: [
+    { position: { x: 17.5, y: 0, z: -2.5 }, yaw: 2.0779, kevlar: 100, helmet: true },
+    { position: { x: 12, y: 0, z: 2 }, yaw: 1.3734, kevlar: 100, helmet: true },
+    { position: { x: 3, y: 0, z: -5.5 }, yaw: 1.8526, kevlar: 100, helmet: true },
+    { position: { x: -7.5, y: 0, z: -5.5 }, yaw: 1.7551, kevlar: 100, helmet: true },
   ],
 };

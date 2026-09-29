@@ -7,6 +7,9 @@ import { SIMULATION_TICK_RATE, SIMULATION_TICK_SECONDS } from '@shared/simulatio
 import { AK47 } from '@shared/weapons/WeaponDefinition';
 import { DEFAULT_WEAPON_RULES } from '@shared/weapons/WeaponRules';
 import { GameLoop } from '../core/GameLoop';
+import { BloodPuffs } from '../combat/BloodPuffs';
+import { TargetView } from '../combat/TargetView';
+import { TrainingRange } from '../combat/TrainingRange';
 import { SystemScheduler } from '../core/SystemScheduler';
 import { DebugOverlay } from '../debug/DebugOverlay';
 import { InputDebugPanel } from '../debug/InputDebugPanel';
@@ -127,9 +130,17 @@ export class ClientApp {
         ? new WeaponViewModel({ source: player, weapon, view: firstPerson, fovDegrees: config.weaponView.viewmodelFovDegrees })
         : null;
       if (viewModel) worldDisposers.push(() => viewModel.dispose());
-      const impacts = new ImpactMarks({ source: player });
-      scene.add(impacts.mesh);
-      worldDisposers.push(() => impacts.dispose());
+      const range = new TrainingRange({ source: player, weapon, spawns: map.targets ?? [] });
+      const targetView = new TargetView({ range });
+      const bloodPuffs = new BloodPuffs({ range, camera });
+      const impacts = new ImpactMarks({ source: range });
+      scene.add(targetView.root, bloodPuffs.mesh, impacts.mesh);
+      worldDisposers.push(
+        () => impacts.dispose(),
+        () => bloodPuffs.dispose(),
+        () => targetView.dispose(),
+        () => range.dispose(),
+      );
 
       const renderer = await GameRenderer.create({
         ...config.renderer,
@@ -168,12 +179,22 @@ export class ClientApp {
         );
       }
       scheduler.add(player);
+      // The local stand-in for the authority: resolves this tick's shots against the targets.
+      scheduler.add(range);
       if (config.debug.player) {
         scheduler.add(new PlayerDebugPanel({ parent: root, player, config: movement }));
       }
       if (config.debug.weapon) {
         scheduler.add(
-          new WeaponDebugPanel({ parent: root, source: player, weapon, rules, tickSeconds: SIMULATION_TICK_SECONDS, marks: () => impacts.size }),
+          new WeaponDebugPanel({
+            parent: root,
+            source: player,
+            weapon,
+            rules,
+            tickSeconds: SIMULATION_TICK_SECONDS,
+            marks: () => impacts.size,
+            range,
+          }),
         );
       }
       // Presentation: after simulation, before rendering. Recoil before the
@@ -183,6 +204,8 @@ export class ClientApp {
       scheduler.add(recoilView);
       scheduler.add(firstPerson);
       if (viewModel) scheduler.add(viewModel);
+      scheduler.add(targetView);
+      scheduler.add(bloodPuffs);
       scheduler.add(
         new Crosshair({
           parent: root,

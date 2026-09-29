@@ -1,3 +1,4 @@
+import type { ShotOutcome, TargetHit, TargetState } from '@shared/combat/targets';
 import type { PlayerState } from '@shared/player/PlayerState';
 import { damageAtDistance } from '@shared/weapons/damage';
 import { situationalInaccuracy } from '@shared/weapons/inaccuracy';
@@ -21,6 +22,11 @@ export interface WeaponDebugPanelOptions {
   readonly tickSeconds: number;
   /** Bullet holes currently shown. */
   readonly marks: () => number;
+  /** The training targets and the resolved shots (for the last target hit). */
+  readonly range: {
+    readonly states: readonly TargetState[];
+    onShotResolved(listener: (outcome: ShotOutcome) => void): () => void;
+  };
 }
 
 const REFRESH_MS = 100;
@@ -44,7 +50,10 @@ export class WeaponDebugPanel implements GameSystem {
   private readonly element: HTMLPreElement;
   private readonly options: WeaponDebugPanelOptions;
   private readonly unsubscribe: () => void;
+  private readonly unsubscribeRange: () => void;
   private readonly shotTicks: number[] = [];
+  private lastTargetHit: TargetHit | null = null;
+  private targetHits = 0;
   private shots = 0;
   private lastShot: Shot | null = null;
   private lastDraw = -Infinity;
@@ -67,6 +76,11 @@ export class WeaponDebugPanel implements GameSystem {
       this.shotTicks.push(shot.tick);
       if (this.shotTicks.length > RATE_WINDOW) this.shotTicks.shift();
     });
+    this.unsubscribeRange = options.range.onShotResolved((outcome) => {
+      if (!outcome.target) return;
+      this.targetHits++;
+      this.lastTargetHit = outcome.target;
+    });
   }
 
   endFrame(): void {
@@ -78,6 +92,7 @@ export class WeaponDebugPanel implements GameSystem {
 
   dispose(): void {
     this.unsubscribe();
+    this.unsubscribeRange();
     this.element.remove();
   }
 
@@ -105,6 +120,15 @@ export class WeaponDebugPanel implements GameSystem {
         ? `Hit       ${hit.distance.toFixed(3)} m  at ${hit.point.x.toFixed(3)} ${hit.point.y.toFixed(3)} ${hit.point.z.toFixed(3)}  damage ${damageAtDistance(weapon, hit.distance).toFixed(1)}`
         : 'Hit       —',
       `Marks     ${this.options.marks()}`,
+      this.lastTargetHit ? this.describeTargetHit(this.lastTargetHit) : 'Target    —',
+      `Targets   ${this.options.range.states.map((target) => `${target.health}/${target.kevlar}`).join('  ') || '—'}  (health/kevlar)`,
     ].join('\n');
+  }
+
+  private describeTargetHit(hit: TargetHit): string {
+    return (
+      `Target    hits ${this.targetHits}  last #${hit.target} ${hit.group}  ${hit.distance.toFixed(2)} m  ` +
+      `damage ${hit.damage.health} (kevlar ${hit.damage.kevlar})  health ${hit.health}${hit.killed ? '  DOWN' : ''}`
+    );
   }
 }

@@ -8,9 +8,10 @@ graybox com uma área de teste de movimento, iluminação, overlay de debug,
 sistema de input (um comando de input por tick, independente do dispositivo),
 player controller determinístico com câmara em primeira pessoa, e a base de
 armas: uma AK-47 com os valores do CS2 (cadência, precisão, recuo, munição),
-tiros hitscan, mira dinâmica e arma em primeira pessoa. Ainda não há alvos,
-dano aplicado, rede, áudio nem menus, e isso é intencional (ver
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)).
+tiros hitscan, mira dinâmica e arma em primeira pessoa, e uma zona de tiro
+com alvos parados que têm hitboxes (cabeça, peito, estômago, braços, pernas)
+e levam dano com as regras do CS2 (armadura incluída). Ainda não há rede,
+bots, áudio nem menus, e isso é intencional (ver [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)).
 
 ## Requisitos
 
@@ -36,7 +37,7 @@ npm run preview     # servir o build de produção em http://localhost:4173
 | `?debug=0`        | Esconde o overlay de debug                               |
 | `?debug=input`    | Mostra também o painel **temporário** de debug do input  |
 | `?debug=player`   | Mostra o painel **temporário** do movimento (combinável: `?debug=input,player`) |
-| `?debug=weapon`   | Mostra o painel **temporário** da arma: munição, cadência, recuo, precisão, último impacto |
+| `?debug=weapon`   | Mostra o painel **temporário** da arma: munição, cadência, recuo, precisão, último impacto, dano nos alvos |
 | `?viewmodel=0`    | Esconde a arma em primeira pessoa (como `r_drawviewmodel 0` no CS) |
 | `?spawn=x,y,z,yaw`| Faz spawn nessa posição (yaw em graus), para testes reproduzíveis |
 
@@ -44,7 +45,8 @@ npm run preview     # servir o build de produção em http://localhost:4173
 
 Clicar na vista do jogo captura o rato (Pointer Lock). `Esc` liberta-o.
 Enquanto não há captura, nenhum input chega ao jogo. O jogador aparece na
-entrada da área de teste de movimento, a leste da arena.
+zona de tiro, junto à porta leste da arena e virado para os alvos (o
+laboratório de movimento fica atrás, do outro lado da porta).
 
 O movimento segue o modelo do CS2 (valores em `PlayerMovementConfig.ts`):
 corre por defeito à velocidade da arma (AK-47: 215 u/s = 5,46 m/s; faca:
@@ -77,6 +79,13 @@ volta a ser preciso, e o spray segue sempre o mesmo padrão de recuo (sobe e
 depois vai para os lados), que se aprende a compensar puxando o rato. A mira
 abre com a imprecisão real e acompanha o recuo (onde as balas vão).
 
+Os quatro alvos (a ~5, 10, 20 e 30 m) têm 100 de vida, colete e capacete,
+como numa ronda competitiva. Com a AK: um tiro na cabeça derruba sempre
+(111 de dano através do capacete), no peito são 27 (quatro tiros), no
+estômago 34 e nas pernas 27 (as pernas não têm armadura). O dano cai com a
+distância. Um alvo atingido pisca a vermelho e sangra; derrubado, cai e
+levanta-se 2 s depois. As balas param no alvo (ainda não há penetração).
+
 ## Estrutura
 
 ```
@@ -100,6 +109,7 @@ src/
     player/                 player controller determinístico (estado, config, movimento, colisão)
     weapons/                armas: dados (AK-47 do CS2), recuo, precisão, disparo, reload, hitscan
     character/              tick completo de um jogador: movimento + arma (o que a predição/servidor repetem)
+    combat/                 hitboxes, grupos de acerto, dano e armadura do CS2, alvos de treino
   client/
     app/                    composition root (ClientApp), configuração, ecrã de erro fatal
     core/                   contrato GameSystem, scheduler de fases, game loop, logger
@@ -108,6 +118,7 @@ src/
       devices/              eventos do browser, Pointer Lock, focus/visibility
     player/                 simulação do jogador local por tick, câmara em primeira pessoa
     weapons/                apresentação da arma: recuo na câmara, arma em 1ª pessoa, marcas de bala
+    combat/                 zona de tiro: resolve os tiros nos alvos (papel do servidor), alvos, sangue
     ui/                     HUD em DOM: mira dinâmica, munição
     rendering/              renderer WebGPU/WebGL 2, viewport/resize, câmara, materiais TSL
     world/                  vista do mapa (malhas) e iluminação

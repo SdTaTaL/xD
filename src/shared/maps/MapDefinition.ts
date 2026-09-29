@@ -23,6 +23,17 @@ export interface SpawnPoint {
   readonly yaw: number;
 }
 
+/** A training dummy: a standing target that takes damage and stands up again (development/training). */
+export interface TargetSpawn {
+  /** Feet position, meters. */
+  readonly position: Vec3;
+  /** Facing, radians (0 faces −Z, positive turns right). */
+  readonly yaw: number;
+  /** Kevlar points, 0–100. */
+  readonly kevlar: number;
+  readonly helmet: boolean;
+}
+
 /**
  * Pure-data description of a map's static geometry.
  *
@@ -35,6 +46,8 @@ export interface MapDefinition {
   readonly solids: readonly MapSolid[];
   /** At least one. */
   readonly spawnPoints: readonly SpawnPoint[];
+  /** Training dummies, if the map has a shooting range. */
+  readonly targets?: readonly TargetSpawn[];
 }
 
 export interface Bounds3 {

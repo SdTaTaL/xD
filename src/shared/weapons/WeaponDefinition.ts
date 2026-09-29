@@ -33,6 +33,13 @@ export interface WeaponDefinition {
   readonly rangeModifier: number;
   /** Farthest a bullet travels, meters. `m_flRange`. */
   readonly range: number;
+  /** Damage multiplier of head hits. `m_flHeadshotMultiplier`. */
+  readonly headshotMultiplier: number;
+  /**
+   * Armor penetration: against a hit group covered by armor, health takes
+   * `armorRatio / 2` of the damage. `m_flArmorRatio` (1.55 → 77.5 %).
+   */
+  readonly armorRatio: number;
 
   // --- Ammunition -------------------------------------------------------------
   /** Rounds per magazine. `m_iMaxClip1`. */
@@ -92,6 +99,8 @@ export const AK47: WeaponDefinition = Object.freeze({
   damage: 36,
   rangeModifier: 0.98,
   range: 8192 * SOURCE_UNIT,
+  headshotMultiplier: 4,
+  armorRatio: 1.55,
 
   magazineSize: 30,
   reserveAmmo: 3 * 30,

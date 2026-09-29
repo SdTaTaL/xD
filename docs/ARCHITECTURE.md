@@ -462,8 +462,9 @@ salto (no ar) + penalização acumulada.
 
 A bala é um raio (`CollisionWorld.raycast`, teste de slabs exato contra
 cada caixa) desde os olhos até ao alcance da arma. O primeiro impacto e o
-dano a essa distância (`damageAtDistance`) ficam no `Shot`. Ainda não há
-alvos nem dano aplicado (próximo passo: hitboxes), nem penetração de paredes.
+dano a essa distância (`damageAtDistance`) ficam no `Shot`. Os alvos são
+resolvidos depois, por quem decide os acertos (ver [Alvos e
+dano](#alvos-e-dano-sharedcombat)). Ainda não há penetração de paredes.
 
 ### Determinismo
 
@@ -502,10 +503,83 @@ ticks de input aleatório com disparos e reloads.
 - Sem sub-tick (o CS2 regista o instante exato do clique dentro do tick),
   sem traçadoras, sem mãos no viewmodel, sem som.
 
+## Alvos e dano (`shared/combat/`)
+
+```
+Shot ─► resolveShot(alvos, tiro, arma) ─► ShotOutcome { tiro, alvo atingido | null } + alvos atualizados
+        (shared/combat: pura)             ├─► TargetView (flash, queda) · BloodPuffs (sangue)
+        corre em TrainingRange            └─► ImpactMarks (só se a bala chegou ao mapa)
+```
+
+Quem decide os acertos é a autoridade: em multijogador, o servidor (com
+compensação de lag). Hoje `TrainingRange` (cliente) faz esse papel, com as
+mesmas funções puras de `shared/combat/`, que passam para o servidor sem
+alterações.
+
+| Ficheiro (`shared/combat/`) | Responsabilidade |
+| --- | --- |
+| `hitboxes.ts` | cápsulas do corpo, raio contra cápsula exato, raio contra um corpo virado |
+| `damage.ts` | grupos de acerto, multiplicadores e armadura do CS2 |
+| `targets.ts` | estado dos alvos de treino, resolução de tiros, levantar ao fim de 2 s |
+
+### Hitboxes
+
+Doze cápsulas (segmento + raio) num corpo de pé com as medidas do jogador do
+CS (72 u de altura, 32 de largura, olhos a 64): cabeça, peito, estômago e
+pélvis (estômago), braços e antebraços, coxas e pernas. O raio passa para o
+espaço do corpo (rodado pelo yaw), por isso as cápsulas nunca se
+transformam. O teste raio-cápsula usa só + − × ÷ e √ (determinístico). O
+primeiro acerto é o mais próximo; em empate ganha a cápsula listada primeiro.
+As proporções são nossas: no CS2 as hitboxes seguem o esqueleto animado.
+
+### Dano (regras do CS2)
+
+Dano = dano da arma × `rangeModifier`^(distância / 500 u) × multiplicador do
+grupo; numa zona com armadura, a vida leva `armorRatio / 2` disso e o colete
+perde metade do que bloqueou. Se o colete acabar, o que não absorveu vai para
+a vida. Arredonda-se para baixo.
+
+| Grupo | Multiplicador | Armadura | AK-47 à queima-roupa (sem / com) |
+| --- | --- | --- | --- |
+| cabeça | `m_flHeadshotMultiplier` (4) | só com capacete | 144 / 111 |
+| peito, braços | 1 | colete | 36 / 27 |
+| estômago | 1,25 | colete | 45 / 34 |
+| pernas | 0,75 | nunca | 27 / 27 |
+
+A AK tem `m_flArmorRatio` 1,55: 77,5 % do dano atravessa a armadura. Um tiro
+na cabeça com capacete mata sempre (111 à queima-roupa, 109 a 10 m, ~106 a
+30 m); no peito são precisos quatro tiros.
+
+### Alvos de treino
+
+- `MapDefinition.targets`: posição, orientação, colete e capacete. A arena tem
+  quatro, a ~5, 10, 20 e 30 m do spawn da zona de tiro, espalhados para que
+  nenhum tape outro e com uma parede atrás de cada um (há um teste para isto).
+- 100 de vida. A bala para no primeiro alvo em pé antes da parede (ainda sem
+  penetração). Derrubado, fica 2 s no chão e levanta-se com vida e armadura
+  cheias.
+- Apresentação: `TargetView` desenha cada alvo com as próprias cápsulas das
+  hitboxes (o que se vê é o que se acerta), em duas malhas por alvo; pisca a
+  vermelho quando é atingido e cai para trás quando é derrubado.
+  `BloodPuffs` mostra o sangue no ponto de impacto (uma única malha
+  instanciada). Como o clarão da arma, o flash e o sangue aparecem sempre
+  pelo menos num frame, mesmo com FPS baixo.
+- `?debug=weapon` mostra o último acerto (grupo, distância, dano, colete, vida)
+  e a vida/colete de cada alvo.
+
+### Aproximações conhecidas
+
+- Proporções das hitboxes nossas, pose fixa, sem grupo "pescoço".
+- Sem penetração (de paredes nem de corpos), sem *tagging* (abrandar quem é
+  atingido), sem compensação de lag (não há rede).
+- Os alvos não bloqueiam o movimento (dá para os atravessar).
+
 ## Mapas
 
 `MapDefinition` (shared) descreve a geometria estática como dados puros:
-caixas alinhadas aos eixos, em metros, e os pontos de spawn. O mesmo formato
+caixas alinhadas aos eixos, em metros, os pontos de spawn e, opcionalmente,
+alvos de treino. O primeiro spawn da arena é o da zona de tiro (junto à porta
+leste, virado para os alvos). O mesmo formato
 alimenta a renderização e a colisão (`CollisionWorld.fromMap`), e vai
 alimentar o servidor. `MapView` (client)
 é apenas uma vista: um único `BoxGeometry` unitário escalado por sólido e um
@@ -513,14 +587,15 @@ material por tipo de sólido.
 
 ## Onde entram os sistemas futuros
 
-Input, Player, armas (base) e a colisão já existem. O resto indica apenas
+Input, Player, armas (base), alvos com dano e a colisão já existem. O resto indica apenas
 onde cada sistema deve viver quando for pedido.
 
 | Sistema      | Lógica partilhada (`src/shared`)                     | Cliente (`src/client`)                                     |
 | ------------ | ---------------------------------------------------- | ---------------------------------------------------------- |
 | Input        | ✅ implementado: `shared/input/`                      | ✅ `input/`: teclado + rato. Falta touch e gamepad (ver [Input](#input)) |
 | Player       | ✅ `shared/player/`: movimento determinístico           | ✅ `player/`: simulação local e câmara em 1ª pessoa        |
-| Weapons      | ✅ `shared/weapons/`: AK-47, recuo, precisão, hitscan; `shared/character/`: tick completo | ✅ `weapons/`: recuo na câmara, viewmodel, marcas. Faltam mais armas, hitboxes e dano |
+| Weapons      | ✅ `shared/weapons/`: AK-47, recuo, precisão, hitscan; `shared/character/`: tick completo | ✅ `weapons/`: recuo na câmara, viewmodel, marcas. Faltam mais armas |
+| Combat       | ✅ `shared/combat/`: hitboxes, dano e armadura do CS2, alvos de treino | ✅ `combat/`: zona de tiro (resolve os tiros), alvos, sangue. Falta penetração |
 | Gameplay     | regras de ronda/modo, estado de jogo                 | ligação do estado à apresentação                           |
 | Physics      | ✅ `shared/physics/`: colisão AABB exata (sem Rapier)   | depuração visual                                           |
 | Networking   | protocolo, serialização, relógio de ticks            | `net/`: transporte; predição = reexecutar `simulateCharacterTick` a partir da correção |
