@@ -7,10 +7,13 @@ import { SIMULATION_TICK_RATE, SIMULATION_TICK_SECONDS } from '@shared/simulatio
 import { AK47 } from '@shared/weapons/WeaponDefinition';
 import { DEFAULT_WEAPON_RULES } from '@shared/weapons/WeaponRules';
 import { GameLoop } from '../core/GameLoop';
+import { GameAudio } from '../audio/GameAudio';
+import { WebAudioOutput } from '../audio/WebAudioOutput';
 import { BloodPuffs } from '../combat/BloodPuffs';
 import { TargetView } from '../combat/TargetView';
 import { TrainingRange } from '../combat/TrainingRange';
 import { SystemScheduler } from '../core/SystemScheduler';
+import { AudioDebugPanel } from '../debug/AudioDebugPanel';
 import { DebugOverlay } from '../debug/DebugOverlay';
 import { InputDebugPanel } from '../debug/InputDebugPanel';
 import { PlayerDebugPanel } from '../debug/PlayerDebugPanel';
@@ -142,6 +145,18 @@ export class ClientApp {
         () => range.dispose(),
       );
 
+      // Sound starts on the first click or key press (browser autoplay policy).
+      const audioOutput = new WebAudioOutput({ gestureTarget: root, keyTarget: window, volume: config.audio.volume });
+      worldDisposers.push(() => audioOutput.dispose());
+      const gameAudio = new GameAudio({
+        output: audioOutput,
+        player,
+        range,
+        weapon,
+        camera,
+        tickSeconds: SIMULATION_TICK_SECONDS,
+      });
+
       const renderer = await GameRenderer.create({
         ...config.renderer,
         scene,
@@ -206,6 +221,20 @@ export class ClientApp {
       if (viewModel) scheduler.add(viewModel);
       scheduler.add(targetView);
       scheduler.add(bloodPuffs);
+      // After the player and the range (tick results) and the camera (the ears).
+      scheduler.add(gameAudio);
+      if (config.debug.audio) {
+        scheduler.add(
+          new AudioDebugPanel({
+            parent: root,
+            output: audioOutput,
+            movement: () => {
+              const last = gameAudio.movement;
+              return last ? `${last.sound}${last.sound === 'step' ? ` (${last.foot === 0 ? 'left' : 'right'})` : ''}` : '—';
+            },
+          }),
+        );
+      }
       scheduler.add(
         new Crosshair({
           parent: root,

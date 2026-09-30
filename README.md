@@ -10,8 +10,10 @@ player controller determinístico com câmara em primeira pessoa, e a base de
 armas: uma AK-47 com os valores do CS2 (cadência, precisão, recuo, munição),
 tiros hitscan, mira dinâmica e arma em primeira pessoa, e uma zona de tiro
 com alvos parados que têm hitboxes (cabeça, peito, estômago, braços, pernas)
-e levam dano com as regras do CS2 (armadura incluída). Ainda não há rede,
-bots, áudio nem menus, e isso é intencional (ver [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)).
+e levam dano com as regras do CS2 (armadura incluída), e som: tiros,
+impactos, passos, saltos e reload, todos sintetizados em código (sem
+ficheiros de áudio), posicionais com HRTF. Ainda não há rede, bots nem
+menus, e isso é intencional (ver [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)).
 
 ## Requisitos
 
@@ -39,12 +41,15 @@ npm run preview     # servir o build de produção em http://localhost:4173
 | `?debug=player`   | Mostra o painel **temporário** do movimento (combinável: `?debug=input,player`) |
 | `?debug=weapon`   | Mostra o painel **temporário** da arma: munição, cadência, recuo, precisão, último impacto, dano nos alvos |
 | `?viewmodel=0`    | Esconde a arma em primeira pessoa (como `r_drawviewmodel 0` no CS) |
+| `?debug=audio`    | Mostra o painel **temporário** do som: estado, nível de saída, sons tocados |
+| `?volume=0.5`     | Volume geral de 0 a 1 (`0` silencia) |
 | `?spawn=x,y,z,yaw`| Faz spawn nessa posição (yaw em graus), para testes reproduzíveis |
 
 ### Controlos (desktop)
 
 Clicar na vista do jogo captura o rato (Pointer Lock). `Esc` liberta-o.
-Enquanto não há captura, nenhum input chega ao jogo. O jogador aparece na
+Enquanto não há captura, nenhum input chega ao jogo. O som começa nesse
+primeiro clique (os browsers não deixam tocar som antes de um gesto). O jogador aparece na
 zona de tiro, junto à porta leste da arena e virado para os alvos (o
 laboratório de movimento fica atrás, do outro lado da porta).
 
@@ -62,7 +67,7 @@ o que torna o bunny hop pouco eficaz.
 | Rato                  | olhar                      |
 | `Espaço`              | saltar                     |
 | `Ctrl`                | agachar                    |
-| `Shift`               | andar (silencioso)         |
+| `Shift`               | andar (sem passos: silencioso) |
 | Botão esquerdo        | disparar (automático: segurar) |
 | `R`                   | recarregar                 |
 | Botão direito         | aim (sem efeito: a AK-47 não tem mira) |
@@ -86,6 +91,12 @@ estômago 34 e nas pernas 27 (as pernas não têm armadura). O dano cai com a
 distância. Um alvo atingido pisca a vermelho e sangra; derrubado, cai e
 levanta-se 2 s depois. As balas param no alvo (ainda não há penetração).
 
+Som, como no CS: a correr ouvem-se os passos; a andar com `Shift` ou
+agachado não (só acima de 55 % da velocidade). Aterrar só faz barulho numa
+queda a sério (acima de 260 u/s), não ao descer um degrau. Um tiro na
+cabeça de um alvo com capacete faz o "tink" metálico; no corpo, um impacto
+seco; na parede, o impacto no betão, vindo do sítio onde acertou.
+
 ## Estrutura
 
 ```
@@ -106,7 +117,7 @@ src/
     maps/grayboxArena.ts    arena graybox simétrica
     input/                  InputAction, InputCommand (contrato de rede), histórico por tick
     physics/                colisão AABB: sweeps por eixo, overlap, saída de penetração, raycast
-    player/                 player controller determinístico (estado, config, movimento, colisão)
+    player/                 player controller determinístico (estado, config, movimento, colisão, passos)
     weapons/                armas: dados (AK-47 do CS2), recuo, precisão, disparo, reload, hitscan
     character/              tick completo de um jogador: movimento + arma (o que a predição/servidor repetem)
     combat/                 hitboxes, grupos de acerto, dano e armadura do CS2, alvos de treino
@@ -120,9 +131,10 @@ src/
     weapons/                apresentação da arma: recuo na câmara, arma em 1ª pessoa, marcas de bala
     combat/                 zona de tiro: resolve os tiros nos alvos (papel do servidor), alvos, sangue
     ui/                     HUD em DOM: mira dinâmica, munição
+    audio/                  som procedural (síntese em código), saída Web Audio com HRTF, eventos → sons
     rendering/              renderer WebGPU/WebGL 2, viewport/resize, câmara, materiais TSL
     world/                  vista do mapa (malhas) e iluminação
-    debug/                  estatísticas de frame, overlay de debug, painéis temporários (input, player, weapon)
+    debug/                  estatísticas de frame, overlay de debug, painéis temporários (input, player, weapon, audio)
     styles/                 CSS global
 ```
 

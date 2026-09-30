@@ -36,6 +36,11 @@ export interface WeaponViewSettings {
   readonly drawViewModel: boolean;
 }
 
+export interface AudioSettings {
+  /** Master volume, 0–1. */
+  readonly volume: number;
+}
+
 export interface DebugSettings {
   readonly overlay: boolean;
   /** Temporary input debug panel. */
@@ -44,6 +49,8 @@ export interface DebugSettings {
   readonly player: boolean;
   /** Temporary weapon debug panel. */
   readonly weapon: boolean;
+  /** Temporary audio debug panel. */
+  readonly audio: boolean;
   /** Development override of the spawn pose, for reproducible tests. */
   readonly spawn: SpawnPose | null;
 }
@@ -54,6 +61,7 @@ export interface ClientConfig {
   readonly loop: LoopSettings;
   readonly input: InputSettings;
   readonly weaponView: WeaponViewSettings;
+  readonly audio: AudioSettings;
   readonly debug: DebugSettings;
 }
 
@@ -87,14 +95,25 @@ const DEFAULT_CONFIG: ClientConfig = {
     viewmodelFovDegrees: 60,
     drawViewModel: true,
   },
+  audio: {
+    volume: 0.8,
+  },
   debug: {
     overlay: true,
     input: false,
     player: false,
     weapon: false,
+    audio: false,
     spawn: null,
   },
 };
+
+/** Parses a volume in 0–1; anything else keeps the default. */
+function parseVolume(value: string | null): number | null {
+  if (value === null || value.trim() === '') return null;
+  const volume = Number(value);
+  return Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : null;
+}
 
 /** Parses `x,y,z,yawDegrees`. */
 function parseSpawn(value: string | null): SpawnPose | null {
@@ -116,10 +135,11 @@ export function withRendererBackend(config: ClientConfig, backend: RendererBacke
  *
  * - `?renderer=webgl` forces the WebGL 2 backend.
  * - `?debug=0` hides the debug overlay.
- * - `?debug=input`, `?debug=player`, `?debug=weapon` (or a list such as
- *   `?debug=input,player`) also show the temporary debug panels.
+ * - `?debug=input`, `?debug=player`, `?debug=weapon`, `?debug=audio` (or a
+ *   list such as `?debug=input,player`) also show the temporary debug panels.
  * - `?spawn=x,y,z,yawDegrees` spawns the player there instead of the map spawn.
  * - `?viewmodel=0` hides the first-person weapon model (CS `r_drawviewmodel 0`).
+ * - `?volume=0.5` sets the master volume (0 mutes).
  */
 export function resolveClientConfig(search: string): ClientConfig {
   const params = new URLSearchParams(search);
@@ -135,11 +155,15 @@ export function resolveClientConfig(search: string): ClientConfig {
       ...DEFAULT_CONFIG.weaponView,
       drawViewModel: params.get('viewmodel') === '0' ? false : DEFAULT_CONFIG.weaponView.drawViewModel,
     },
+    audio: {
+      volume: parseVolume(params.get('volume')) ?? DEFAULT_CONFIG.audio.volume,
+    },
     debug: {
       overlay: debug.has('0') ? false : DEFAULT_CONFIG.debug.overlay,
       input: debug.has('input') || DEFAULT_CONFIG.debug.input,
       player: debug.has('player') || DEFAULT_CONFIG.debug.player,
       weapon: debug.has('weapon') || DEFAULT_CONFIG.debug.weapon,
+      audio: debug.has('audio') || DEFAULT_CONFIG.debug.audio,
       spawn: parseSpawn(params.get('spawn')) ?? DEFAULT_CONFIG.debug.spawn,
     },
   };

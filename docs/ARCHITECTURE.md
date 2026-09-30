@@ -574,6 +574,60 @@ na cabeça com capacete mata sempre (111 à queima-roupa, 109 a 10 m, ~106 a
   atingido), sem compensação de lag (não há rede).
 - Os alvos não bloqueiam o movimento (dá para os atravessar).
 
+## Áudio
+
+```
+Shot, ShotOutcome, estados por tick ─► GameAudio (o que soa e onde) ─► AudioOutput ─► WebAudioOutput ─► colunas
+                                        passos: shared/player/footsteps.ts   (interface)   HRTF, limitador
+```
+
+Sem ficheiros de áudio: todos os sons são sintetizados em código no arranque
+do som (`client/audio/sounds.ts`, com as funções de `dsp.ts`: ruído com
+semente, filtros, envelopes, tons amortecidos). São determinísticos e
+testados em Node (amostras válidas, normalizadas, com ataque rápido e fim
+sem clique).
+
+| Som | Quando | Onde |
+| --- | --- | --- |
+| `shot` (3 takes, tom ±3 %) | cada tiro próprio | nos ouvidos |
+| `impact` | bala no mapa | ponto de impacto |
+| `flesh` / `helmet` | bala num alvo / tiro na cabeça absorvido pelo capacete | no alvo |
+| `step` (4 takes), `jump`, `land` | movimento próprio | nos ouvidos |
+| `magout`, `magin`, `bolt` | 20 %, 55 % e 80 % do reload (a troca de carregador do viewmodel) | nos ouvidos |
+| `dryfire` | gatilho com o carregador vazio (não durante o reload) | nos ouvidos |
+
+### Passos (`shared/player/footsteps.ts`)
+
+No CS2 é o servidor que decide os passos (`mp_footsteps_serverside`), porque
+são informação de jogo. Por isso a regra é partilhada, pura e
+determinística, e o cliente só a toca:
+- passos só acima de 55 % da velocidade máxima (`footstep_audible_threshold`):
+  andar com `Shift` (52 %) e agachado (34 %) são silenciosos;
+- um passo a cada 75 u de chão (0,3 s à velocidade da faca, o tempo de passo
+  a correr do Source), a alternar pés;
+- saltar faz som; aterrar só a cair acima de 260 u/s
+  (`sv_min_jump_landing_sound`): um salto sim, descer um degrau não.
+
+### Saída (`WebAudioOutput`)
+
+- O `AudioContext` só é criado no primeiro clique ou tecla (política de
+  autoplay dos browsers; o clique que captura o rato serve). Assim não há
+  avisos na consola. Os sons são sintetizados logo a seguir, fora do clique.
+- Sons posicionais passam por `PannerNode` HRTF (direção e distância, como
+  com auscultadores no CS2), com atenuação inversa a partir de 2 m. Os
+  ouvidos seguem a câmara em cada frame.
+- Volume geral (`?volume=`) e um limitador no fim: os sprays sobrepõem as
+  caudas dos tiros e sem ele a saída passava de 1 (clipping).
+- `?debug=audio` mostra o estado, o nível de saída e quantas vezes tocou
+  cada som.
+
+### Aproximações conhecidas
+
+- Os sons são sintetizados, não gravados: têm o carácter certo (estalo e
+  corpo do tiro, "tink" do capacete, passos secos), mas não são os do CS2.
+- Ainda não há oclusão (paredes a abafar), reverberação do espaço, nem sons
+  de outros jogadores (não há rede).
+
 ## Mapas
 
 `MapDefinition` (shared) descreve a geometria estática como dados puros:
@@ -587,7 +641,7 @@ material por tipo de sólido.
 
 ## Onde entram os sistemas futuros
 
-Input, Player, armas (base), alvos com dano e a colisão já existem. O resto indica apenas
+Input, Player, armas (base), alvos com dano, áudio e a colisão já existem. O resto indica apenas
 onde cada sistema deve viver quando for pedido.
 
 | Sistema      | Lógica partilhada (`src/shared`)                     | Cliente (`src/client`)                                     |
@@ -599,7 +653,7 @@ onde cada sistema deve viver quando for pedido.
 | Gameplay     | regras de ronda/modo, estado de jogo                 | ligação do estado à apresentação                           |
 | Physics      | ✅ `shared/physics/`: colisão AABB exata (sem Rapier)   | depuração visual                                           |
 | Networking   | protocolo, serialização, relógio de ticks            | `net/`: transporte; predição = reexecutar `simulateCharacterTick` a partir da correção |
-| Audio        | —                                                    | `audio/`: Web Audio, som posicional                        |
+| Audio        | ✅ `shared/player/footsteps.ts`: quem faz barulho      | ✅ `audio/`: sons procedurais, Web Audio com HRTF. Falta oclusão e reverberação |
 | UI           | —                                                    | ✅ `ui/`: HUD em DOM (mira, munição). Faltam menus          |
 | Servidor     | reutiliza `src/shared`                               | novo `src/server/`, ou pacote próprio num monorepo          |
 
