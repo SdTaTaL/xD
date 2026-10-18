@@ -1,97 +1,103 @@
-<title>Ilha Voxel</title>
+<title>Planeta no Espaço</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <style>
-:root{--sky:#9fd3f0;--ui:rgba(20,30,40,.45);--fg:#fff;color-scheme:light}
+:root{--space:#02030a;--ui:rgba(255,255,255,.08);--line:rgba(255,255,255,.18);--fg:#e8eefc;color-scheme:dark}
 html,body{height:100%;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none}
-body{background:var(--sky);color:var(--fg);font-family:system-ui,sans-serif}
+body{background:var(--space);color:var(--fg);font-family:system-ui,sans-serif}
 canvas#c{display:block;width:100%;height:100%}
-#joy{position:fixed;left:calc(24px + env(safe-area-inset-left,0px));bottom:calc(24px + env(safe-area-inset-bottom,0px));width:140px;height:140px;border-radius:50%;background:var(--ui);border:2px solid rgba(255,255,255,.4)}
-#knob{position:absolute;left:45px;top:45px;width:50px;height:50px;border-radius:50%;background:rgba(255,255,255,.8)}
-#jump{position:fixed;right:calc(24px + env(safe-area-inset-right,0px));bottom:calc(40px + env(safe-area-inset-bottom,0px));width:90px;height:90px;border-radius:50%;background:var(--ui);border:2px solid rgba(255,255,255,.4);color:var(--fg);font-size:16px;font-weight:700}
-#help{position:fixed;top:calc(12px + env(safe-area-inset-top,0px));left:50%;transform:translateX(-50%);background:var(--ui);padding:8px 14px;border-radius:10px;font-size:13px;text-align:center;max-width:90vw}
-#score{position:fixed;top:calc(12px + env(safe-area-inset-top,0px));right:calc(16px + env(safe-area-inset-right,0px));background:var(--ui);padding:8px 12px;border-radius:10px;font-weight:700}
+#help{position:fixed;top:calc(12px + env(safe-area-inset-top,0px));left:50%;transform:translateX(-50%);background:var(--ui);border:1px solid var(--line);backdrop-filter:blur(6px);padding:8px 14px;border-radius:10px;font-size:13px;text-align:center;max-width:90vw}
+#bar{position:fixed;bottom:calc(20px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);display:flex;gap:10px}
+#bar button{background:var(--ui);border:1px solid var(--line);color:var(--fg);padding:12px 16px;border-radius:12px;font-size:15px;backdrop-filter:blur(6px)}
+#bar button:focus-visible{outline:2px solid #7ab8ff}
 </style>
 <canvas id="c"></canvas>
-<div id="help">Joystick à esquerda para andar · arrasta o ecrã para olhar · apanha as estrelas ⭐ (PC: WASD + rato + espaço)</div>
-<div id="score">⭐ 0 / 12</div>
-<div id="joy"><div id="knob"></div></div>
-<button id="jump">SALTAR</button>
+<div id="help">Arrasta para rodar o planeta · belisca com dois dedos para aproximar</div>
+<div id="bar">
+  <button id="spin" type="button">⏸ Rotação</button>
+  <button id="moon" type="button">🌙 Ir à Lua</button>
+  <button id="reset" type="button">🌍 Terra</button>
+</div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 const canvas=document.getElementById('c');
-const R=new THREE.WebGLRenderer({canvas,antialias:true});
-R.setPixelRatio(Math.min(devicePixelRatio,2));R.shadowMap.enabled=true;
-const S=new THREE.Scene();S.background=new THREE.Color(0x9fd3f0);S.fog=new THREE.Fog(0x9fd3f0,40,110);
-const cam=new THREE.PerspectiveCamera(65,1,.1,300);
-S.add(new THREE.HemisphereLight(0xffffff,0x557744,.7));
-const sun=new THREE.DirectionalLight(0xffffff,.8);sun.position.set(30,50,20);sun.castShadow=true;
-Object.assign(sun.shadow.camera,{left:-60,right:60,top:60,bottom:-60});sun.shadow.mapSize.set(2048,2048);S.add(sun);
+const R=new THREE.WebGLRenderer({canvas,antialias:true});R.setPixelRatio(Math.min(devicePixelRatio,2));
+const S=new THREE.Scene(),cam=new THREE.PerspectiveCamera(45,1,.1,2000);
 
-// terreno
-function h(x,z){return Math.sin(x*.08)*3+Math.cos(z*.07)*3+Math.sin((x+z)*.05)*2-Math.max(0,Math.hypot(x,z)-45)*.6}
-const g=new THREE.PlaneGeometry(140,140,120,120);g.rotateX(-Math.PI/2);
-const p=g.attributes.position,cols=[];
-for(let i=0;i<p.count;i++){const y=h(p.getX(i),p.getZ(i));p.setY(i,y);
- const c=y<-1.5?[.85,.8,.55]:y>4?[.55,.55,.5]:[.35,.65,.3];cols.push(...c)}
-g.setAttribute('color',new THREE.Float32BufferAttribute(cols,3));g.computeVertexNormals();
-const ground=new THREE.Mesh(g,new THREE.MeshLambertMaterial({vertexColors:true}));ground.receiveShadow=true;S.add(ground);
-const water=new THREE.Mesh(new THREE.PlaneGeometry(400,400),new THREE.MeshLambertMaterial({color:0x2f7fc0,transparent:true,opacity:.8}));
-water.rotation.x=-Math.PI/2;water.position.y=-2;S.add(water);
+// ruído 3D para gerar continentes sem imagens externas
+const perm=new Uint8Array(512);{const a=[...Array(256).keys()];for(let i=255;i>0;i--){const j=(Math.random()*(i+1))|0;[a[i],a[j]]=[a[j],a[i]]}for(let i=0;i<512;i++)perm[i]=a[i&255]}
+const fade=t=>t*t*(3-2*t),lerp=(a,b,t)=>a+(b-a)*t,hs=(x,y,z)=>perm[perm[perm[x&255]+(y&255)]+(z&255)]/255;
+function noise(x,y,z){const X=Math.floor(x),Y=Math.floor(y),Z=Math.floor(z),u=fade(x-X),v=fade(y-Y),w=fade(z-Z);
+ return lerp(lerp(lerp(hs(X,Y,Z),hs(X+1,Y,Z),u),lerp(hs(X,Y+1,Z),hs(X+1,Y+1,Z),u),v),lerp(lerp(hs(X,Y,Z+1),hs(X+1,Y,Z+1),u),lerp(hs(X,Y+1,Z+1),hs(X+1,Y+1,Z+1),u),v),w)}
+function fbm(x,y,z,o){let s=0,a=.5,f=1;for(let i=0;i<o;i++){s+=noise(x*f,y*f,z*f)*a;a*=.5;f*=2}return s}
+function makeTex(W,H,fn){const c=document.createElement('canvas');c.width=W;c.height=H;const x=c.getContext('2d'),img=x.createImageData(W,H),d=img.data;
+ for(let j=0;j<H;j++){const lat=(j/H-.5)*Math.PI;for(let i=0;i<W;i++){const lon=i/W*Math.PI*2;
+  const px=Math.cos(lat)*Math.cos(lon),py=Math.sin(lat),pz=Math.cos(lat)*Math.sin(lon);const k=(j*W+i)*4,c=fn(px,py,pz,Math.abs(lat));
+  d[k]=c[0];d[k+1]=c[1];d[k+2]=c[2];d[k+3]=c[3]??255}}
+ x.putImageData(img,0,0);const t=new THREE.CanvasTexture(c);t.anisotropy=4;return t}
 
-// árvores e pedras
-const trunkM=new THREE.MeshLambertMaterial({color:0x7a5230}),leafM=new THREE.MeshLambertMaterial({color:0x2e8b3a});
-for(let i=0;i<90;i++){const x=(Math.random()-.5)*90,z=(Math.random()-.5)*90,y=h(x,z);if(y<-1||Math.hypot(x,z)<5)continue;
- const t=new THREE.Mesh(new THREE.CylinderGeometry(.3,.4,2),trunkM);t.position.set(x,y+1,z);t.castShadow=true;S.add(t);
- const l=new THREE.Mesh(new THREE.ConeGeometry(1.6,3.5,7),leafM);l.position.set(x,y+3.5,z);l.castShadow=true;S.add(l)}
-const rockM=new THREE.MeshLambertMaterial({color:0x888888});
-for(let i=0;i<30;i++){const x=(Math.random()-.5)*90,z=(Math.random()-.5)*90;
- const r=new THREE.Mesh(new THREE.DodecahedronGeometry(Math.random()*.8+.4),rockM);r.position.set(x,h(x,z),z);r.castShadow=true;S.add(r)}
-// nuvens
-const cloudM=new THREE.MeshLambertMaterial({color:0xffffff}),clouds=[];
-for(let i=0;i<14;i++){const c=new THREE.Group();for(let j=0;j<4;j++){const s=new THREE.Mesh(new THREE.SphereGeometry(2+Math.random()*2,8,8),cloudM);s.position.set(j*2.5,Math.random(),Math.random()*2);c.add(s)}
- c.position.set((Math.random()-.5)*160,25+Math.random()*8,(Math.random()-.5)*160);S.add(c);clouds.push(c)}
+const earthTex=makeTex(1024,512,(x,y,z,lat)=>{const e=fbm(x*2+5,y*2+5,z*2+5,6);
+ if(lat>1.35)return[235,242,250];
+ if(e<.5){const d=Math.max(0,(.5-e)*5);return[10,40+30*(1-d),100+60*(1-d)]}
+ const m=e-.5;if(lat>1.2)return[220,230,235];
+ if(m>.15)return[130,115,95];
+ const dry=fbm(x*4,y*4,z*4,3);return dry>.55&&lat<.6?[190,165,110]:[40+m*200,110-m*150,40]});
+const cloudTex=makeTex(1024,512,(x,y,z)=>{const n=fbm(x*3+20,y*5,z*3,5);const a=Math.max(0,(n-.5)*3.5);return[255,255,255,Math.min(1,a)*230]});
+const moonTex=makeTex(512,256,(x,y,z)=>{const n=fbm(x*4+9,y*4,z*4,5),c=fbm(x*12,y*12,z*12,2);const v=120+n*90-(c>.65?50:0);return[v,v,v]});
+
+S.add(new THREE.AmbientLight(0x223344,.6));
+const sunL=new THREE.DirectionalLight(0xffffff,1.4);sunL.position.set(-50,10,30);S.add(sunL);
+
+const earth=new THREE.Group();S.add(earth);earth.rotation.z=.41;
+const globe=new THREE.Mesh(new THREE.SphereGeometry(10,96,96),new THREE.MeshPhongMaterial({map:earthTex,shininess:15,specular:0x223344}));earth.add(globe);
+const clouds=new THREE.Mesh(new THREE.SphereGeometry(10.15,96,96),new THREE.MeshLambertMaterial({map:cloudTex,transparent:true,depthWrite:false}));earth.add(clouds);
+// atmosfera
+const atm=new THREE.Mesh(new THREE.SphereGeometry(11,64,64),new THREE.ShaderMaterial({transparent:true,side:THREE.BackSide,blending:THREE.AdditiveBlending,depthWrite:false,
+ vertexShader:'varying vec3 n;void main(){n=normalize(normalMatrix*normal);gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
+ fragmentShader:'varying vec3 n;void main(){float i=pow(.75-dot(n,vec3(0,0,1.)),3.);gl_FragColor=vec4(.3,.6,1.,1.)*i;}'}));S.add(atm);
+
+// lua
+const moonPivot=new THREE.Group();S.add(moonPivot);
+const moon=new THREE.Mesh(new THREE.SphereGeometry(2.7,48,48),new THREE.MeshLambertMaterial({map:moonTex}));moon.position.set(38,0,0);moonPivot.add(moon);moonPivot.rotation.x=.1;
+// sol
+const sunM=new THREE.Mesh(new THREE.SphereGeometry(8,32,32),new THREE.MeshBasicMaterial({color:0xfff2c0}));sunM.position.set(-500,100,300);S.add(sunM);
+const glowC=document.createElement('canvas');glowC.width=glowC.height=128;{const g=glowC.getContext('2d'),gr=g.createRadialGradient(64,64,0,64,64,64);gr.addColorStop(0,'rgba(255,240,200,1)');gr.addColorStop(.3,'rgba(255,200,120,.4)');gr.addColorStop(1,'rgba(255,200,120,0)');g.fillStyle=gr;g.fillRect(0,0,128,128)}
+const glow=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(glowC),blending:THREE.AdditiveBlending,depthWrite:false}));glow.scale.set(120,120,1);glow.position.copy(sunM.position);S.add(glow);
 // estrelas
-const starM=new THREE.MeshLambertMaterial({color:0xffd700,emissive:0x664400}),stars=[];
-for(let i=0;i<12;i++){const a=i/12*Math.PI*2,d=10+Math.random()*28,x=Math.cos(a)*d,z=Math.sin(a)*d;
- const s=new THREE.Mesh(new THREE.OctahedronGeometry(.7),starM);s.position.set(x,Math.max(h(x,z),-2)+1.5,z);s.castShadow=true;S.add(s);stars.push(s)}
-let got=0;const scoreEl=document.getElementById('score');
+{const n=4000,pos=new Float32Array(n*3),col=new Float32Array(n*3);for(let i=0;i<n;i++){const v=new THREE.Vector3().randomDirection?null:null;
+ const u=Math.random()*2-1,t=Math.random()*Math.PI*2,r=800,s=Math.sqrt(1-u*u);pos.set([r*s*Math.cos(t),r*u,r*s*Math.sin(t)],i*3);
+ const b=.5+Math.random()*.5,w=Math.random();col.set(w<.1?[b,b*.8,b*.6]:w<.2?[b*.7,b*.8,b]:[b,b,b],i*3)}
+ const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.BufferAttribute(pos,3));g.setAttribute('color',new THREE.BufferAttribute(col,3));
+ S.add(new THREE.Points(g,new THREE.PointsMaterial({size:1.6,vertexColors:true,sizeAttenuation:false})))}
 
-// jogador
-const pl={x:0,z:0,y:h(0,0),vy:0,yaw:0,pitch:-.1,ground:true};
-const input={mx:0,mz:0,jump:false},keys={};
-addEventListener('keydown',e=>keys[e.code]=true);addEventListener('keyup',e=>keys[e.code]=false);
+// câmara orbital com toque
+const view={yaw:.6,pitch:.25,dist:34,tYaw:.6,tPitch:.25,tDist:34,target:new THREE.Vector3(),tTarget:new THREE.Vector3(),follow:null};
+const pts=new Map();let pinch0=0,dist0=0;
+canvas.addEventListener('pointerdown',e=>{canvas.setPointerCapture(e.pointerId);pts.set(e.pointerId,{x:e.clientX,y:e.clientY});
+ if(pts.size===2){const[a,b]=[...pts.values()];pinch0=Math.hypot(a.x-b.x,a.y-b.y);dist0=view.tDist}});
+canvas.addEventListener('pointermove',e=>{const p=pts.get(e.pointerId);if(!p)return;
+ if(pts.size===1){view.tYaw-=(e.clientX-p.x)*.006;view.tPitch=Math.max(-1.4,Math.min(1.4,view.tPitch+(e.clientY-p.y)*.006))}
+ p.x=e.clientX;p.y=e.clientY;
+ if(pts.size===2){const[a,b]=[...pts.values()];const d=Math.hypot(a.x-b.x,a.y-b.y);view.tDist=clampD(dist0*pinch0/d)}});
+const up=e=>pts.delete(e.pointerId);canvas.addEventListener('pointerup',up);canvas.addEventListener('pointercancel',up);
+canvas.addEventListener('wheel',e=>{e.preventDefault();view.tDist=clampD(view.tDist*(1+e.deltaY*.001))},{passive:false});
+function clampD(d){const min=view.follow?4.5:13.5;return Math.max(min,Math.min(200,d))}
 
-// joystick
-const joy=document.getElementById('joy'),knob=document.getElementById('knob');let joyId=null,lookId=null,lx=0,ly=0;
-joy.addEventListener('pointerdown',e=>{joyId=e.pointerId;joy.setPointerCapture(e.pointerId);moveJoy(e)});
-joy.addEventListener('pointermove',e=>{if(e.pointerId===joyId)moveJoy(e)});
-const endJoy=e=>{if(e.pointerId!==joyId)return;joyId=null;input.mx=input.mz=0;knob.style.transform=''};
-joy.addEventListener('pointerup',endJoy);joy.addEventListener('pointercancel',endJoy);
-function moveJoy(e){const r=joy.getBoundingClientRect();let dx=e.clientX-r.left-70,dy=e.clientY-r.top-70;const d=Math.hypot(dx,dy),m=50;
- if(d>m){dx*=m/d;dy*=m/d}knob.style.transform=`translate(${dx}px,${dy}px)`;input.mx=dx/m;input.mz=dy/m}
-// olhar
-canvas.addEventListener('pointerdown',e=>{if(lookId===null){lookId=e.pointerId;lx=e.clientX;ly=e.clientY;canvas.setPointerCapture(e.pointerId)}});
-canvas.addEventListener('pointermove',e=>{if(e.pointerId!==lookId)return;pl.yaw-=(e.clientX-lx)*.005;pl.pitch=Math.max(-1.2,Math.min(1,pl.pitch-(e.clientY-ly)*.005));lx=e.clientX;ly=e.clientY});
-const endLook=e=>{if(e.pointerId===lookId)lookId=null};canvas.addEventListener('pointerup',endLook);canvas.addEventListener('pointercancel',endLook);
-const jb=document.getElementById('jump');jb.addEventListener('pointerdown',e=>{e.preventDefault();input.jump=true});jb.addEventListener('pointerup',()=>input.jump=false);
+let spinning=true;const spinB=document.getElementById('spin');
+spinB.onclick=()=>{spinning=!spinning;spinB.textContent=spinning?'⏸ Rotação':'▶ Rotação'};
+document.getElementById('moon').onclick=()=>{view.follow=moon;view.tDist=10};
+document.getElementById('reset').onclick=()=>{view.follow=null;view.tDist=34};
 
 function resize(){R.setSize(innerWidth,innerHeight,false);cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix()}
 addEventListener('resize',resize);resize();
 
 let last=performance.now();
 function loop(t){const dt=Math.min(.05,(t-last)/1000);last=t;
- let mx=input.mx,mz=input.mz;if(keys.KeyW)mz=-1;if(keys.KeyS)mz=1;if(keys.KeyA)mx=-1;if(keys.KeyD)mx=1;
- const sp=9,s=Math.sin(pl.yaw),c=Math.cos(pl.yaw);
- const nx=pl.x+(mx*c+mz*s)*sp*dt,nz=pl.z+(-mx*s+mz*c)*sp*dt;
- if(Math.hypot(nx,nz)<62){pl.x=nx;pl.z=nz}
- const gy=Math.max(h(pl.x,pl.z),-2.5);
- if((input.jump||keys.Space)&&pl.ground){pl.vy=9;pl.ground=false}
- pl.vy-=22*dt;pl.y+=pl.vy*dt;if(pl.y<=gy){pl.y=gy;pl.vy=0;pl.ground=true}
- cam.position.set(pl.x,pl.y+1.7,pl.z);cam.rotation.set(pl.pitch,pl.yaw,0,'YXZ');
- for(const st of stars){if(!st.visible)continue;st.rotation.y+=dt*2;st.position.y+=Math.sin(t/300+st.position.x)*.005;
-  if(st.position.distanceTo(cam.position)<2.2){st.visible=false;got++;scoreEl.textContent=got===12?'🎉 Todas apanhadas!':`⭐ ${got} / 12`}}
- for(const cl of clouds){cl.position.x+=dt*1.5;if(cl.position.x>90)cl.position.x=-90}
- R.render(S,cam);requestAnimationFrame(loop)}
+ if(spinning){globe.rotation.y+=dt*.08;clouds.rotation.y+=dt*.1;moonPivot.rotation.y+=dt*.03;moon.rotation.y+=dt*.03}
+ if(view.follow)view.follow.getWorldPosition(view.tTarget);else view.tTarget.set(0,0,0);
+ const k=1-Math.pow(.001,dt);
+ view.yaw+=(view.tYaw-view.yaw)*k;view.pitch+=(view.tPitch-view.pitch)*k;view.dist+=(view.tDist-view.dist)*k;view.target.lerp(view.tTarget,k);
+ cam.position.set(Math.cos(view.pitch)*Math.sin(view.yaw),Math.sin(view.pitch),Math.cos(view.pitch)*Math.cos(view.yaw)).multiplyScalar(view.dist).add(view.target);
+ cam.lookAt(view.target);R.render(S,cam);requestAnimationFrame(loop)}
 requestAnimationFrame(loop);
 setTimeout(()=>document.getElementById('help').hidden=true,8000);
 </script>
