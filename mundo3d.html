@@ -1,103 +1,206 @@
 <title>Planeta no Espaço</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <style>
-:root{--space:#02030a;--ui:rgba(255,255,255,.08);--line:rgba(255,255,255,.18);--fg:#e8eefc;color-scheme:dark}
-html,body{height:100%;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none}
-body{background:var(--space);color:var(--fg);font-family:system-ui,sans-serif}
+:root{--space:#02030a;--ui:rgba(140,180,255,.10);--line:rgba(160,200,255,.28);--fg:#e8eefc;--dim:#9fb0d0;--glow:#6ff3ff;--gold:#ffd166;color-scheme:dark}
+html,body{height:100%;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+body{background:var(--space);color:var(--fg);font-family:"Exo 2",system-ui,sans-serif}
 canvas#c{display:block;width:100%;height:100%}
-#help{position:fixed;top:calc(12px + env(safe-area-inset-top,0px));left:50%;transform:translateX(-50%);background:var(--ui);border:1px solid var(--line);backdrop-filter:blur(6px);padding:8px 14px;border-radius:10px;font-size:13px;text-align:center;max-width:90vw}
-#bar{position:fixed;bottom:calc(20px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);display:flex;gap:10px}
-#bar button{background:var(--ui);border:1px solid var(--line);color:var(--fg);padding:12px 16px;border-radius:12px;font-size:15px;backdrop-filter:blur(6px)}
-#bar button:focus-visible{outline:2px solid #7ab8ff}
+.panel{position:fixed;background:var(--ui);border:1px solid var(--line);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border-radius:12px}
+#hud{top:calc(12px + env(safe-area-inset-top,0px));left:calc(12px + env(safe-area-inset-left,0px));padding:8px 12px;font-size:14px;display:grid;gap:2px;font-variant-numeric:tabular-nums}
+#hud b{color:var(--glow)}
+#info{top:calc(12px + env(safe-area-inset-top,0px));left:50%;transform:translateX(-50%);padding:10px 14px;max-width:min(420px,60vw);text-align:center;font-size:13px;color:var(--dim)}
+#info h2{margin:0 0 2px;font-size:18px;color:var(--fg);letter-spacing:.04em}
+#top{top:calc(12px + env(safe-area-inset-top,0px));right:calc(12px + env(safe-area-inset-right,0px));display:flex;gap:8px;background:none;border:0;backdrop-filter:none}
+button{font:inherit;color:var(--fg);background:var(--ui);border:1px solid var(--line);border-radius:12px;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+button:focus-visible{outline:2px solid var(--glow)}
+#top button{padding:10px 14px;font-size:14px}
+#joy{left:calc(28px + env(safe-area-inset-left,0px));bottom:calc(28px + env(safe-area-inset-bottom,0px));width:150px;height:150px;border-radius:50%}
+#knob{position:absolute;left:47px;top:47px;width:56px;height:56px;border-radius:50%;background:rgba(200,230,255,.75);box-shadow:0 0 18px rgba(111,243,255,.5)}
+#pads{position:fixed;right:calc(28px + env(safe-area-inset-right,0px));bottom:calc(28px + env(safe-area-inset-bottom,0px));display:flex;gap:14px;align-items:flex-end}
+#boost{width:78px;height:78px;border-radius:50%;font-size:13px;font-weight:700;color:var(--gold)}
+#thrust{width:110px;height:110px;border-radius:50%;font-size:15px;font-weight:700}
+#pads button.on{background:rgba(111,243,255,.3);border-color:var(--glow)}
+#arrow{position:fixed;left:0;top:0;width:0;height:0;pointer-events:none}
+#arrow::before{content:"";position:absolute;left:-14px;top:-14px;width:28px;height:28px;background:var(--glow);clip-path:polygon(100% 50%,0 0,25% 50%,0 100%);filter:drop-shadow(0 0 6px var(--glow))}
+#ring{position:fixed;width:44px;height:44px;margin:-22px;border:2px solid var(--glow);border-radius:50%;pointer-events:none;box-shadow:0 0 12px var(--glow)}
+#msg{left:50%;top:40%;transform:translate(-50%,-50%);padding:18px 26px;font-size:22px;font-weight:700;text-align:center;transition:opacity .5s}
+#msg small{display:block;font-size:14px;font-weight:400;color:var(--dim);margin-top:6px}
+@media (max-width:600px){#info{top:auto;bottom:calc(200px + env(safe-area-inset-bottom,0px));max-width:80vw}}
+@media (prefers-reduced-motion:reduce){#msg{transition:none}}
 </style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;700&display=swap">
 <canvas id="c"></canvas>
-<div id="help">Arrasta para rodar o planeta · belisca com dois dedos para aproximar</div>
-<div id="bar">
-  <button id="spin" type="button">⏸ Rotação</button>
-  <button id="moon" type="button">🌙 Ir à Lua</button>
-  <button id="reset" type="button">🌍 Terra</button>
-</div>
+<div id="hud" class="panel"><span>💎 <b id="cnt">0</b> / 8 cristais</span><span>Velocidade <b id="spd">0</b></span><span id="next"></span></div>
+<div id="info" class="panel" hidden><h2 id="pname"></h2><span id="pfact"></span></div>
+<div id="top" class="panel"><button id="mapB" type="button">🗺️ Mapa</button></div>
+<div id="joy" class="panel"><div id="knob"></div></div>
+<div id="pads"><button id="boost" type="button">TURBO</button><button id="thrust" type="button">ACELERAR</button></div>
+<div id="arrow" hidden></div><div id="ring" hidden></div>
+<div id="msg" class="panel">Missão: apanha os 8 cristais<small>Joystick para virar a nave · mantém ACELERAR para voar · segue a seta azul</small></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
-const canvas=document.getElementById('c');
+const $=id=>document.getElementById(id),canvas=$('c');
 const R=new THREE.WebGLRenderer({canvas,antialias:true});R.setPixelRatio(Math.min(devicePixelRatio,2));
-const S=new THREE.Scene(),cam=new THREE.PerspectiveCamera(45,1,.1,2000);
+const S=new THREE.Scene(),cam=new THREE.PerspectiveCamera(60,1,.1,5000);
 
-// ruído 3D para gerar continentes sem imagens externas
+// ---------- ruído para texturas procedurais ----------
 const perm=new Uint8Array(512);{const a=[...Array(256).keys()];for(let i=255;i>0;i--){const j=(Math.random()*(i+1))|0;[a[i],a[j]]=[a[j],a[i]]}for(let i=0;i<512;i++)perm[i]=a[i&255]}
 const fade=t=>t*t*(3-2*t),lerp=(a,b,t)=>a+(b-a)*t,hs=(x,y,z)=>perm[perm[perm[x&255]+(y&255)]+(z&255)]/255;
 function noise(x,y,z){const X=Math.floor(x),Y=Math.floor(y),Z=Math.floor(z),u=fade(x-X),v=fade(y-Y),w=fade(z-Z);
  return lerp(lerp(lerp(hs(X,Y,Z),hs(X+1,Y,Z),u),lerp(hs(X,Y+1,Z),hs(X+1,Y+1,Z),u),v),lerp(lerp(hs(X,Y,Z+1),hs(X+1,Y,Z+1),u),lerp(hs(X,Y+1,Z+1),hs(X+1,Y+1,Z+1),u),v),w)}
 function fbm(x,y,z,o){let s=0,a=.5,f=1;for(let i=0;i<o;i++){s+=noise(x*f,y*f,z*f)*a;a*=.5;f*=2}return s}
+const mix=(a,b,t)=>[lerp(a[0],b[0],t),lerp(a[1],b[1],t),lerp(a[2],b[2],t)];
 function makeTex(W,H,fn){const c=document.createElement('canvas');c.width=W;c.height=H;const x=c.getContext('2d'),img=x.createImageData(W,H),d=img.data;
  for(let j=0;j<H;j++){const lat=(j/H-.5)*Math.PI;for(let i=0;i<W;i++){const lon=i/W*Math.PI*2;
-  const px=Math.cos(lat)*Math.cos(lon),py=Math.sin(lat),pz=Math.cos(lat)*Math.sin(lon);const k=(j*W+i)*4,c=fn(px,py,pz,Math.abs(lat));
+  const px=Math.cos(lat)*Math.cos(lon),py=Math.sin(lat),pz=Math.cos(lat)*Math.sin(lon),k=(j*W+i)*4,c=fn(px,py,pz,Math.abs(lat));
   d[k]=c[0];d[k+1]=c[1];d[k+2]=c[2];d[k+3]=c[3]??255}}
- x.putImageData(img,0,0);const t=new THREE.CanvasTexture(c);t.anisotropy=4;return t}
+ x.putImageData(img,0,0);return new THREE.CanvasTexture(c)}
+const rocky=(c1,c2,sc,seed)=>(x,y,z)=>{const n=fbm(x*sc+seed,y*sc,z*sc,5),cr=fbm(x*sc*4,y*sc*4+seed,z*sc*4,2);return mix(c1,c2,n).map(v=>v-(cr>.66?35:0))};
+const gas=(pal,seed,turb)=>(x,y,z)=>{const t=(Math.sin(y*14+fbm(x*2+seed,y*3,z*2,4)*turb)+1)/2,i=t*(pal.length-1),k=Math.floor(i);return mix(pal[k],pal[Math.min(k+1,pal.length-1)],i-k)};
+const earthFn=(x,y,z,lat)=>{const e=fbm(x*2+5,y*2+5,z*2+5,6);if(lat>1.35)return[235,242,250];
+ if(e<.5){const d=Math.min(1,(.5-e)*5);return[10,40+30*(1-d),100+60*(1-d)]}const m=e-.5;if(lat>1.2)return[220,230,235];
+ if(m>.15)return[130,115,95];return fbm(x*4,y*4,z*4,3)>.55&&lat<.6?[190,165,110]:[40+m*200,110-m*150,40]};
 
-const earthTex=makeTex(1024,512,(x,y,z,lat)=>{const e=fbm(x*2+5,y*2+5,z*2+5,6);
- if(lat>1.35)return[235,242,250];
- if(e<.5){const d=Math.max(0,(.5-e)*5);return[10,40+30*(1-d),100+60*(1-d)]}
- const m=e-.5;if(lat>1.2)return[220,230,235];
- if(m>.15)return[130,115,95];
- const dry=fbm(x*4,y*4,z*4,3);return dry>.55&&lat<.6?[190,165,110]:[40+m*200,110-m*150,40]});
-const cloudTex=makeTex(1024,512,(x,y,z)=>{const n=fbm(x*3+20,y*5,z*3,5);const a=Math.max(0,(n-.5)*3.5);return[255,255,255,Math.min(1,a)*230]});
-const moonTex=makeTex(512,256,(x,y,z)=>{const n=fbm(x*4+9,y*4,z*4,5),c=fbm(x*12,y*12,z*12,2);const v=120+n*90-(c>.65?50:0);return[v,v,v]});
-
-S.add(new THREE.AmbientLight(0x223344,.6));
-const sunL=new THREE.DirectionalLight(0xffffff,1.4);sunL.position.set(-50,10,30);S.add(sunL);
-
-const earth=new THREE.Group();S.add(earth);earth.rotation.z=.41;
-const globe=new THREE.Mesh(new THREE.SphereGeometry(10,96,96),new THREE.MeshPhongMaterial({map:earthTex,shininess:15,specular:0x223344}));earth.add(globe);
-const clouds=new THREE.Mesh(new THREE.SphereGeometry(10.15,96,96),new THREE.MeshLambertMaterial({map:cloudTex,transparent:true,depthWrite:false}));earth.add(clouds);
-// atmosfera
-const atm=new THREE.Mesh(new THREE.SphereGeometry(11,64,64),new THREE.ShaderMaterial({transparent:true,side:THREE.BackSide,blending:THREE.AdditiveBlending,depthWrite:false,
- vertexShader:'varying vec3 n;void main(){n=normalize(normalMatrix*normal);gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
- fragmentShader:'varying vec3 n;void main(){float i=pow(.75-dot(n,vec3(0,0,1.)),3.);gl_FragColor=vec4(.3,.6,1.,1.)*i;}'}));S.add(atm);
-
-// lua
-const moonPivot=new THREE.Group();S.add(moonPivot);
-const moon=new THREE.Mesh(new THREE.SphereGeometry(2.7,48,48),new THREE.MeshLambertMaterial({map:moonTex}));moon.position.set(38,0,0);moonPivot.add(moon);moonPivot.rotation.x=.1;
-// sol
-const sunM=new THREE.Mesh(new THREE.SphereGeometry(8,32,32),new THREE.MeshBasicMaterial({color:0xfff2c0}));sunM.position.set(-500,100,300);S.add(sunM);
-const glowC=document.createElement('canvas');glowC.width=glowC.height=128;{const g=glowC.getContext('2d'),gr=g.createRadialGradient(64,64,0,64,64,64);gr.addColorStop(0,'rgba(255,240,200,1)');gr.addColorStop(.3,'rgba(255,200,120,.4)');gr.addColorStop(1,'rgba(255,200,120,0)');g.fillStyle=gr;g.fillRect(0,0,128,128)}
-const glow=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(glowC),blending:THREE.AdditiveBlending,depthWrite:false}));glow.scale.set(120,120,1);glow.position.copy(sunM.position);S.add(glow);
-// estrelas
-{const n=4000,pos=new Float32Array(n*3),col=new Float32Array(n*3);for(let i=0;i<n;i++){const v=new THREE.Vector3().randomDirection?null:null;
- const u=Math.random()*2-1,t=Math.random()*Math.PI*2,r=800,s=Math.sqrt(1-u*u);pos.set([r*s*Math.cos(t),r*u,r*s*Math.sin(t)],i*3);
- const b=.5+Math.random()*.5,w=Math.random();col.set(w<.1?[b,b*.8,b*.6]:w<.2?[b*.7,b*.8,b]:[b,b,b],i*3)}
+// ---------- luz, Sol e estrelas ----------
+S.add(new THREE.AmbientLight(0x334466,.35));
+S.add(new THREE.PointLight(0xfff4e0,1.8,0,0));
+const fill=new THREE.DirectionalLight(0x8899cc,.35);fill.position.set(0,1,1);cam.add(fill);S.add(cam);
+const sun=new THREE.Mesh(new THREE.SphereGeometry(18,48,48),new THREE.MeshBasicMaterial({map:makeTex(256,128,(x,y,z)=>mix([255,170,40],[255,245,190],fbm(x*5,y*5,z*5,5)))}));S.add(sun);
+function glowTex(rgb){const c=document.createElement('canvas');c.width=c.height=128;const g=c.getContext('2d'),gr=g.createRadialGradient(64,64,0,64,64,64);
+ gr.addColorStop(0,`rgba(${rgb},1)`);gr.addColorStop(.25,`rgba(${rgb},.45)`);gr.addColorStop(1,`rgba(${rgb},0)`);g.fillStyle=gr;g.fillRect(0,0,128,128);return new THREE.CanvasTexture(c)}
+const sunGlow=new THREE.Sprite(new THREE.SpriteMaterial({map:glowTex('255,200,110'),blending:THREE.AdditiveBlending,depthWrite:false}));sunGlow.scale.set(140,140,1);S.add(sunGlow);
+{const n=5000,pos=new Float32Array(n*3),col=new Float32Array(n*3);for(let i=0;i<n;i++){const u=Math.random()*2-1,t=Math.random()*Math.PI*2,r=2500,s=Math.sqrt(1-u*u);
+ pos.set([r*s*Math.cos(t),r*u,r*s*Math.sin(t)],i*3);const b=.4+Math.random()*.6,w=Math.random();col.set(w<.1?[b,b*.8,b*.6]:w<.2?[b*.7,b*.8,b]:[b,b,b],i*3)}
  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.BufferAttribute(pos,3));g.setAttribute('color',new THREE.BufferAttribute(col,3));
  S.add(new THREE.Points(g,new THREE.PointsMaterial({size:1.6,vertexColors:true,sizeAttenuation:false})))}
 
-// câmara orbital com toque
-const view={yaw:.6,pitch:.25,dist:34,tYaw:.6,tPitch:.25,tDist:34,target:new THREE.Vector3(),tTarget:new THREE.Vector3(),follow:null};
-const pts=new Map();let pinch0=0,dist0=0;
-canvas.addEventListener('pointerdown',e=>{canvas.setPointerCapture(e.pointerId);pts.set(e.pointerId,{x:e.clientX,y:e.clientY});
- if(pts.size===2){const[a,b]=[...pts.values()];pinch0=Math.hypot(a.x-b.x,a.y-b.y);dist0=view.tDist}});
-canvas.addEventListener('pointermove',e=>{const p=pts.get(e.pointerId);if(!p)return;
- if(pts.size===1){view.tYaw-=(e.clientX-p.x)*.006;view.tPitch=Math.max(-1.4,Math.min(1.4,view.tPitch+(e.clientY-p.y)*.006))}
- p.x=e.clientX;p.y=e.clientY;
- if(pts.size===2){const[a,b]=[...pts.values()];const d=Math.hypot(a.x-b.x,a.y-b.y);view.tDist=clampD(dist0*pinch0/d)}});
-const up=e=>pts.delete(e.pointerId);canvas.addEventListener('pointerup',up);canvas.addEventListener('pointercancel',up);
-canvas.addEventListener('wheel',e=>{e.preventDefault();view.tDist=clampD(view.tDist*(1+e.deltaY*.001))},{passive:false});
-function clampD(d){const min=view.follow?4.5:13.5;return Math.max(min,Math.min(200,d))}
+// ---------- planetas ----------
+const DATA=[
+ {n:'Mercúrio',d:45,r:2.2,f:rocky([90,85,80],[170,160,150],3,1),fact:'O mais pequeno e o mais perto do Sol. Um ano lá dura só 88 dias.'},
+ {n:'Vénus',d:68,r:3.8,f:gas([[230,190,120],[245,220,160],[210,170,110]],2,3),fact:'O planeta mais quente: mais de 460 °C, por causa das nuvens que prendem o calor.'},
+ {n:'Terra',d:95,r:4,f:earthFn,clouds:true,atm:'.3,.6,1.',fact:'A nossa casa! O único planeta conhecido com vida e água líquida à superfície.'},
+ {n:'Marte',d:125,r:3,f:rocky([150,60,30],[220,120,70],2.5,7),atm:'1.,.5,.3',fact:'O planeta vermelho. Tem o Monte Olimpo, o maior vulcão do Sistema Solar.'},
+ {n:'Júpiter',d:200,r:12,f:gas([[200,170,140],[240,225,200],[170,110,80],[230,200,170],[190,140,100]],3,4),fact:'O gigante: cabem lá dentro mais de 1300 Terras. A Grande Mancha Vermelha é uma tempestade.'},
+ {n:'Saturno',d:270,r:10,f:gas([[220,200,150],[240,225,180],[200,175,120]],4,2),ring:true,fact:'Famoso pelos anéis, feitos de gelo e rocha. É tão leve que flutuaria na água.'},
+ {n:'Úrano',d:330,r:6.5,f:gas([[160,220,230],[180,235,240]],5,1),atm:'.5,.9,1.',fact:'Roda deitado de lado! Um polo fica virado para o Sol durante 42 anos.'},
+ {n:'Neptuno',d:385,r:6.3,f:gas([[50,90,200],[80,130,230],[40,70,170]],6,3),atm:'.3,.5,1.',fact:'O mais distante e com os ventos mais fortes: mais de 2000 km/h.'}];
+const atmVS='varying vec3 n;void main(){n=normalize(normalMatrix*normal);gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}';
+const planets=[],crystals=[];
+const crystalM=new THREE.MeshPhongMaterial({color:0x6ff3ff,emissive:0x1a8fa8,shininess:90,transparent:true,opacity:.9});
+DATA.forEach((p,i)=>{
+ const pivot=new THREE.Group();pivot.rotation.y=Math.random()*Math.PI*2;S.add(pivot);
+ const body=new THREE.Group();body.position.x=p.d;pivot.add(body);
+ const mesh=new THREE.Mesh(new THREE.SphereGeometry(p.r,64,64),new THREE.MeshPhongMaterial({map:makeTex(p.n==='Terra'?512:256,p.n==='Terra'?256:128,p.f),shininess:8}));body.add(mesh);
+ if(p.clouds)body.add(new THREE.Mesh(new THREE.SphereGeometry(p.r*1.02,64,64),new THREE.MeshLambertMaterial({map:makeTex(512,256,(x,y,z)=>[255,255,255,Math.min(1,Math.max(0,(fbm(x*3+20,y*5,z*3,5)-.5)*3.5))*230]),transparent:true,depthWrite:false})));
+ if(p.atm)body.add(new THREE.Mesh(new THREE.SphereGeometry(p.r*1.12,48,48),new THREE.ShaderMaterial({transparent:true,side:THREE.BackSide,blending:THREE.AdditiveBlending,depthWrite:false,vertexShader:atmVS,
+  fragmentShader:`varying vec3 n;void main(){float i=pow(.75-dot(n,vec3(0,0,1.)),3.);gl_FragColor=vec4(${p.atm},1.)*i;}`})));
+ if(p.ring){const c=document.createElement('canvas');c.width=c.height=256;const g=c.getContext('2d');
+  for(let k=0;k<70;k++){const rr=128*(.55+k/70*.45);g.strokeStyle=`rgba(${210+Math.random()*30},${190+Math.random()*30},${150},${.25+Math.random()*.6})`;g.lineWidth=2;g.beginPath();g.arc(128,128,rr,0,7);g.stroke()}
+  const ring=new THREE.Mesh(new THREE.RingGeometry(p.r*1.3,p.r*2.3,96),new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(c),side:THREE.DoubleSide,transparent:true,depthWrite:false}));
+  ring.rotation.x=-Math.PI/2+.45;body.add(ring);
+  // os UV do anel são planos; ajusta para o centro do canvas
+  const uv=ring.geometry.attributes.uv,pp=ring.geometry.attributes.position,m=p.r*2.3;for(let k=0;k<uv.count;k++)uv.setXY(k,pp.getX(k)/m/2+.5,pp.getY(k)/m/2+.5)}
+ if(p.n==='Terra'){const moon=new THREE.Mesh(new THREE.SphereGeometry(1.1,32,32),new THREE.MeshLambertMaterial({map:makeTex(128,64,rocky([110,110,110],[200,200,200],4,9))}));
+  const mp=new THREE.Group();moon.position.x=10;mp.add(moon);body.add(mp);body.userData.moon=mp}
+ // órbita visível
+ const og=new THREE.BufferGeometry().setFromPoints([...Array(181)].map((_,k)=>new THREE.Vector3(Math.cos(k/90*Math.PI)*p.d,0,Math.sin(k/90*Math.PI)*p.d)));
+ S.add(new THREE.Line(og,new THREE.LineBasicMaterial({color:0x4a6a9a,transparent:true,opacity:.35})));
+ // cristal a orbitar o planeta
+ const cp=new THREE.Group();body.add(cp);const cr=new THREE.Mesh(new THREE.OctahedronGeometry(1.4),crystalM);cr.scale.y=1.6;cr.position.set(p.r+5,1,0);cp.add(cr);
+ const cg=new THREE.Sprite(new THREE.SpriteMaterial({map:glowTex('111,243,255'),blending:THREE.AdditiveBlending,depthWrite:false}));cg.scale.set(9,9,1);cr.add(cg);
+ crystals.push({mesh:cr,pivot:cp,planet:p.n,got:false});
+ planets.push({...p,pivot,body,mesh,speed:6/Math.pow(p.d,1.5)});
+});
+// cintura de asteroides
+const belt=new THREE.InstancedMesh(new THREE.DodecahedronGeometry(1,0),new THREE.MeshLambertMaterial({color:0x8a7f72}),700);
+{const m=new THREE.Matrix4(),q=new THREE.Quaternion(),e=new THREE.Euler();for(let i=0;i<700;i++){const a=Math.random()*Math.PI*2,d=150+Math.random()*25,s=.3+Math.random()*1.4;
+ q.setFromEuler(e.set(Math.random()*3,Math.random()*3,0));m.compose(new THREE.Vector3(Math.cos(a)*d,(Math.random()-.5)*6,Math.sin(a)*d),q,new THREE.Vector3(s,s*.8,s));belt.setMatrixAt(i,m)}}
+S.add(belt);
 
-let spinning=true;const spinB=document.getElementById('spin');
-spinB.onclick=()=>{spinning=!spinning;spinB.textContent=spinning?'⏸ Rotação':'▶ Rotação'};
-document.getElementById('moon').onclick=()=>{view.follow=moon;view.tDist=10};
-document.getElementById('reset').onclick=()=>{view.follow=null;view.tDist=34};
+// ---------- nave ----------
+const ship=new THREE.Group(),hull=new THREE.Group();ship.add(hull);S.add(ship);
+{const white=new THREE.MeshPhongMaterial({color:0xe8ecf4,shininess:60}),dark=new THREE.MeshPhongMaterial({color:0x2a3550}),red=new THREE.MeshPhongMaterial({color:0xe05050});
+ const body=new THREE.Mesh(new THREE.ConeGeometry(.7,3.6,12),white);body.rotation.x=-Math.PI/2;hull.add(body);
+ const cockpit=new THREE.Mesh(new THREE.SphereGeometry(.45,16,12),new THREE.MeshPhongMaterial({color:0x6ff3ff,emissive:0x0a4050,shininess:100}));cockpit.position.set(0,.4,-.3);cockpit.scale.z=1.8;hull.add(cockpit);
+ const wing=new THREE.Mesh(new THREE.BoxGeometry(4.2,.12,1.2),dark);wing.position.z=.8;hull.add(wing);
+ for(const s of[-1,1]){const tip=new THREE.Mesh(new THREE.BoxGeometry(.2,.6,1.1),red);tip.position.set(s*2.1,.2,.9);hull.add(tip)}
+ const fin=new THREE.Mesh(new THREE.BoxGeometry(.1,.9,.9),red);fin.position.set(0,.5,1.2);hull.add(fin)}
+const flame=new THREE.Sprite(new THREE.SpriteMaterial({map:glowTex('120,200,255'),blending:THREE.AdditiveBlending,depthWrite:false}));flame.position.z=2.1;hull.add(flame);
+const earthP=planets[2];earthP.body.updateWorldMatrix(true,false);
+ship.position.copy(earthP.body.getWorldPosition(new THREE.Vector3())).add(new THREE.Vector3(0,4,22));
+ship.lookAt(earthP.body.getWorldPosition(new THREE.Vector3()));ship.rotateY(Math.PI); // lookAt aponta +Z; a frente da nave é -Z
+let speed=0;
+
+// ---------- controlos ----------
+const input={x:0,y:0,thrust:false,boost:false},keys={};
+addEventListener('keydown',e=>keys[e.code]=true);addEventListener('keyup',e=>keys[e.code]=false);
+const joy=$('joy'),knob=$('knob');let joyId=null;
+joy.addEventListener('pointerdown',e=>{joyId=e.pointerId;joy.setPointerCapture(e.pointerId);moveJoy(e)});
+joy.addEventListener('pointermove',e=>{if(e.pointerId===joyId)moveJoy(e)});
+const endJoy=e=>{if(e.pointerId!==joyId)return;joyId=null;input.x=input.y=0;knob.style.transform=''};
+joy.addEventListener('pointerup',endJoy);joy.addEventListener('pointercancel',endJoy);
+function moveJoy(e){const r=joy.getBoundingClientRect();let dx=e.clientX-r.left-75,dy=e.clientY-r.top-75;const d=Math.hypot(dx,dy),m=55;
+ if(d>m){dx*=m/d;dy*=m/d}knob.style.transform=`translate(${dx}px,${dy}px)`;input.x=dx/m;input.y=dy/m}
+function hold(id,key){const b=$(id),on=v=>{input[key]=v;b.classList.toggle('on',v)};
+ b.addEventListener('pointerdown',e=>{e.preventDefault();b.setPointerCapture(e.pointerId);on(true)});
+ for(const ev of['pointerup','pointercancel','lostpointercapture'])b.addEventListener(ev,()=>on(false))}
+hold('thrust','thrust');hold('boost','boost');
+let mapMode=false;$('mapB').onclick=()=>{mapMode=!mapMode;$('mapB').textContent=mapMode?'🚀 Nave':'🗺️ Mapa'};
+document.addEventListener('contextmenu',e=>e.preventDefault());
 
 function resize(){R.setSize(innerWidth,innerHeight,false);cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix()}
 addEventListener('resize',resize);resize();
 
-let last=performance.now();
+// ---------- ciclo ----------
+let got=0,last=performance.now(),msgT=6;
+const tmp=new THREE.Vector3(),tmp2=new THREE.Vector3(),fwd=new THREE.Vector3(),camOff=new THREE.Vector3();
+function showMsg(html,t=3){$('msg').innerHTML=html;$('msg').style.opacity=1;msgT=t}
+cam.position.copy(ship.position).add(new THREE.Vector3(0,3.2,13).applyQuaternion(ship.quaternion));
 function loop(t){const dt=Math.min(.05,(t-last)/1000);last=t;
- if(spinning){globe.rotation.y+=dt*.08;clouds.rotation.y+=dt*.1;moonPivot.rotation.y+=dt*.03;moon.rotation.y+=dt*.03}
- if(view.follow)view.follow.getWorldPosition(view.tTarget);else view.tTarget.set(0,0,0);
- const k=1-Math.pow(.001,dt);
- view.yaw+=(view.tYaw-view.yaw)*k;view.pitch+=(view.tPitch-view.pitch)*k;view.dist+=(view.tDist-view.dist)*k;view.target.lerp(view.tTarget,k);
- cam.position.set(Math.cos(view.pitch)*Math.sin(view.yaw),Math.sin(view.pitch),Math.cos(view.pitch)*Math.cos(view.yaw)).multiplyScalar(view.dist).add(view.target);
- cam.lookAt(view.target);R.render(S,cam);requestAnimationFrame(loop)}
+ // planetas
+ sun.rotation.y+=dt*.02;
+ for(const p of planets){p.pivot.rotation.y+=p.speed*dt;p.mesh.rotation.y+=dt*.3;if(p.body.userData.moon)p.body.userData.moon.rotation.y+=dt*.5}
+ belt.rotation.y+=dt*.004;
+ // nave
+ let jx=input.x,jy=input.y;if(keys.ArrowLeft||keys.KeyA)jx=-1;if(keys.ArrowRight||keys.KeyD)jx=1;if(keys.ArrowUp||keys.KeyW)jy=-1;if(keys.ArrowDown||keys.KeyS)jy=1;
+ const thrust=input.thrust||keys.Space,boost=input.boost||keys.ShiftLeft||keys.ShiftRight;
+ ship.rotateY(-jx*1.6*dt);ship.rotateX(-jy*1.3*dt);
+ hull.rotation.z=lerp(hull.rotation.z,-jx*.6,1-Math.pow(.01,dt));
+ const target=thrust||boost?(boost?140:45):0;speed=lerp(speed,target,1-Math.pow(target>speed?.3:.5,dt));
+ fwd.set(0,0,-1).applyQuaternion(ship.quaternion);ship.position.addScaledVector(fwd,speed*dt);
+ flame.scale.setScalar(.6+speed/30+Math.random()*.3);flame.material.opacity=Math.min(1,.2+speed/40);
+ // colisões com planetas e Sol
+ for(const p of planets){p.body.getWorldPosition(tmp);const d=ship.position.distanceTo(tmp),min=p.r+2;
+  if(d<min){ship.position.sub(tmp).setLength(min).add(tmp);speed*=.5}}
+ if(ship.position.length()<26){ship.position.setLength(26);speed*=.5}
+ if(ship.position.length()>900)ship.position.setLength(900);
+ // cristais
+ let next=null,nd=1e9;
+ for(const c of crystals){if(c.got)continue;c.pivot.rotation.y+=dt*.6;c.mesh.rotation.y+=dt*2;c.mesh.getWorldPosition(tmp);const d=tmp.distanceTo(ship.position);
+  if(d<4.5){c.got=true;c.mesh.visible=false;got++;$('cnt').textContent=got;
+   showMsg(got===8?'🏆 Missão completa!<small>Apanhaste todos os cristais do Sistema Solar</small>':`💎 Cristal de ${c.planet}!<small>Faltam ${8-got}</small>`,got===8?8:2.5);continue}
+  if(d<nd){nd=d;next=c}}
+ $('spd').textContent=Math.round(speed*1000).toLocaleString('pt-PT')+' km/s';
+ $('next').innerHTML=next?`Próximo: <b>${next.planet}</b> · ${Math.round(nd)} u`:'';
+ // planeta próximo
+ let near=null;for(const p of planets){p.body.getWorldPosition(tmp);if(tmp.distanceTo(ship.position)<p.r*3+18){near=p;break}}
+ if(!near&&ship.position.length()<70)near={n:'Sol',fact:'Uma estrela com 5500 °C à superfície. Cabem lá dentro 1,3 milhões de Terras.'};
+ $('info').hidden=!near;if(near){$('pname').textContent=near.n;$('pfact').textContent=near.fact}
+ // câmara
+ const k=1-Math.pow(.002,dt);
+ if(mapMode){cam.position.lerp(tmp2.set(ship.position.x,ship.position.y+260,ship.position.z+60),k);cam.lookAt(ship.position);hull.scale.setScalar(lerp(hull.scale.x,6,k))}
+ else{camOff.set(0,3.2+speed*.004,13+speed*.03).applyQuaternion(ship.quaternion);cam.position.lerp(tmp2.copy(ship.position).add(camOff),Math.min(1,k*2.5));
+  cam.quaternion.slerp(ship.quaternion,Math.min(1,k*2.5));hull.scale.setScalar(lerp(hull.scale.x,1,k))}
+ cam.fov=lerp(cam.fov,60+speed*.12,k);cam.updateProjectionMatrix();
+ // seta para o próximo cristal
+ const arrow=$('arrow'),ring=$('ring');
+ if(next){next.mesh.getWorldPosition(tmp);const v=tmp.project(cam),behind=v.z>1;let x=v.x,y=v.y;if(behind){x=-x;y=-y}
+  const W=innerWidth/2,H=innerHeight/2;
+  if(!behind&&Math.abs(x)<.9&&Math.abs(y)<.85){ring.hidden=false;arrow.hidden=true;ring.style.left=(x+1)*W+'px';ring.style.top=(1-y)*H+'px'}
+  else{ring.hidden=true;arrow.hidden=false;const a=Math.atan2(-y*H,x*W),rx=W-50,ry=H-60,s=Math.min(rx/Math.abs(Math.cos(a)||1e-6),ry/Math.abs(Math.sin(a)||1e-6));
+   arrow.style.transform=`translate(${W+Math.cos(a)*s}px,${H+Math.sin(a)*s}px) rotate(${a}rad)`}}
+ else{arrow.hidden=ring.hidden=true}
+ if(msgT>0){msgT-=dt;if(msgT<=0)$('msg').style.opacity=0}
+ R.render(S,cam);requestAnimationFrame(loop)}
 requestAnimationFrame(loop);
-setTimeout(()=>document.getElementById('help').hidden=true,8000);
 </script>
